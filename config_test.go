@@ -169,6 +169,30 @@ rules:
 	}
 }
 
+func TestLoadConfigPrefixPathMode(t *testing.T) {
+	yaml := `
+rules:
+  - name: "prefix rule"
+    request:
+      method: GET
+      path: /api
+      path_mode: prefix
+    response:
+      status: 200
+      body: ok
+`
+	tmp := writeTemp(t, "config*.yaml", yaml)
+	defer os.Remove(tmp)
+
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Rules[0].Request.PathMode != "prefix" {
+		t.Errorf("path_mode = %q, want prefix", cfg.Rules[0].Request.PathMode)
+	}
+}
+
 func TestLoadConfigBodyFile(t *testing.T) {
 	bodyContent := `{"from": "file"}`
 	bodyFile := writeTemp(t, "body*.json", bodyContent)

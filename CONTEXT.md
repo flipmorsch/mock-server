@@ -4,12 +4,12 @@
 A mapping from an HTTP request pattern (method, URL path, headers, query parameters, body) to a pre-configured mock HTTP response. All specified criteria of a Rule must match for the Rule to trigger (AND semantics). When multiple Rules match a request, the first one defined takes precedence (first-match-wins).
 
 
-The MVP supports method and exact path matching only. Prefix, regex, header, query parameter, and body matching are deferred.
+Prefix path matching is now supported alongside exact. Regex, header, query parameter, and body matching are deferred.
+
 ### Path Matching
-A Rule's URL path can be matched in one of three modes, chosen per-Rule:
+A Rule's URL path can be matched in one of two modes, chosen per-Rule:
 - **Exact** — the request path must equal the Rule's path exactly.
-- **Prefix** — the request path must start with the Rule's path.
-- **Regex** — the request path must match the Rule's regular expression.
+- **Prefix** — the request path must equal the Rule's path, or start with the Rule's path followed by `/` (path-segment prefix).
 
 ### Header, Query, and Body Matching
 Headers and query parameters use exact value matching. Body matching supports two modes, chosen per-Rule:

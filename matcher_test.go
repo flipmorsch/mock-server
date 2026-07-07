@@ -58,6 +58,39 @@ func TestMatchDefaultPathModeIsExact(t *testing.T) {
 	}
 }
 
+func TestMatchPrefixPath(t *testing.T) {
+	rule := &Rule{
+		Request: Request{
+			Method:   "GET",
+			Path:     "/users",
+			PathMode: "prefix",
+		},
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"exact match", "/users", true},
+		{"subpath", "/users/42", true},
+		{"deep subpath", "/users/42/profile", true},
+		{"wrong prefix", "/other/42", false},
+		{"partial segment", "/users-extra", false},
+		{"root", "/", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.path, nil)
+			got := match(rule, req)
+			if got != tt.want {
+				t.Errorf("match(GET %s) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchMethodNormalization(t *testing.T) {
 	rule := &Rule{
 		Request: Request{

@@ -1,6 +1,9 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 func match(rule *Rule, r *http.Request) bool {
 	if normalizeMethod(rule.Request.Method) != normalizeMethod(r.Method) {
@@ -15,6 +18,8 @@ func match(rule *Rule, r *http.Request) bool {
 	switch mode {
 	case "exact":
 		return rule.Request.Path == r.URL.Path
+	case "prefix":
+		return r.URL.Path == rule.Request.Path || strings.HasPrefix(r.URL.Path, rule.Request.Path+"/")
 	}
 
 	return false

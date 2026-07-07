@@ -8,13 +8,21 @@ import (
 	"os"
 )
 
+const version = "0.2.0"
+
 func main() {
 	listenOverride := flag.String("listen", "", "override listen address (e.g., 127.0.0.1:8080)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: mock-server [--listen addr:port] <config.yaml>\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("mock-server version", version)
+		os.Exit(0)
+	}
+
 
 	if flag.NArg() < 1 {
 		flag.Usage()

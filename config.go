@@ -64,9 +64,9 @@ func (c *Config) validate() error {
 			mode = "exact"
 		}
 		switch mode {
-		case "exact":
+		case "exact", "prefix":
 		default:
-			return fmt.Errorf("rule %d (%q): unsupported path_mode %q (only 'exact' is supported)", i+1, rule.Name, rule.Request.PathMode)
+			return fmt.Errorf("rule %d (%q): unsupported path_mode %q (supported: exact, prefix)", i+1, rule.Name, rule.Request.PathMode)
 		}
 		if rule.Response.Headers != nil {
 			canonical := make(map[string]string, len(rule.Response.Headers))
