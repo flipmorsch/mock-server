@@ -4,17 +4,22 @@
 A mapping from an HTTP request pattern (method, URL path, headers, query parameters, body) to a pre-configured mock HTTP response. All specified criteria of a Rule must match for the Rule to trigger (AND semantics). When multiple Rules match a request, the first one defined takes precedence (first-match-wins).
 
 
-Prefix path matching is now supported alongside exact. Regex, header, query parameter, and body matching are deferred.
+All match dimensions are now implemented: method, path (exact, prefix, regex), headers, query parameters, and body. Latency simulation, dynamic responses, and runtime configuration remain deferred.
 
 ### Path Matching
-A Rule's URL path can be matched in one of two modes, chosen per-Rule:
+A Rule's URL path can be matched in one of three modes, chosen per-Rule:
 - **Exact** — the request path must equal the Rule's path exactly.
 - **Prefix** — the request path must equal the Rule's path, or start with the Rule's path followed by `/` (path-segment prefix).
+- **Regex** — the request path must match the Rule's regular expression (validated at startup).
 
-### Header, Query, and Body Matching
-Headers and query parameters use exact value matching. Body matching supports two modes, chosen per-Rule:
-- **Exact** — the request body must equal the Rule's body exactly.
-- **Contains** — the request body must contain the Rule's body as a substring.
+### Header and Query Matching
+Headers and query parameters use exact value matching. All specified key-value pairs must match (AND semantics). Extra query parameters in the request are ignored; extra headers are ignored.
+
+### Body Matching
+Body matching supports two modes, chosen per-Rule:
+- **Exact** — the request body must equal the Rule's value exactly.
+- **Contains** — the request body must contain the Rule's value as a substring.
+Defaults to exact if mode is omitted.
 
 ### Response
 A Rule's response is static: HTTP status code, headers, and body. No templating, latency simulation, or dynamic generation. The body is specified via `body` (inline string) or `body_file` (path to a file read at startup), mutually exclusive. If no `Content-Type` header is specified, the server sets `Content-Type: text/plain; charset=utf-8`.
