@@ -124,6 +124,79 @@ func TestMatchRegexPath(t *testing.T) {
 	}
 }
 
+func TestMatchHeaders(t *testing.T) {
+	rule := &Rule{
+		Request: Request{
+			Method: "POST",
+			Path:   "/submit",
+			Headers: map[string]string{
+				"Content-Type": "application/json",
+			},
+		},
+	}
+
+	t.Run("matching header", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/submit", nil)
+		req.Header.Set("Content-Type", "application/json")
+		if !match(rule, req) {
+			t.Error("should match when header value matches")
+		}
+	})
+
+	t.Run("missing header", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/submit", nil)
+		if match(rule, req) {
+			t.Error("should not match when required header is missing")
+		}
+	})
+
+	t.Run("wrong header value", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/submit", nil)
+		req.Header.Set("Content-Type", "text/plain")
+		if match(rule, req) {
+			t.Error("should not match when header value differs")
+		}
+	})
+
+	t.Run("multiple headers all match", func(t *testing.T) {
+		r := &Rule{
+			Request: Request{
+				Method: "GET",
+				Path:   "/data",
+				Headers: map[string]string{
+					"Content-Type": "application/json",
+					"X-Api-Key":    "secret",
+				},
+			},
+		}
+		req := httptest.NewRequest("GET", "/data", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Api-Key", "secret")
+		if !match(r, req) {
+			t.Error("should match when all headers match")
+		}
+	})
+
+	t.Run("one of multiple headers wrong", func(t *testing.T) {
+		r := &Rule{
+			Request: Request{
+				Method: "GET",
+				Path:   "/data",
+				Headers: map[string]string{
+					"Content-Type": "application/json",
+					"X-Api-Key":    "secret",
+				},
+			},
+		}
+		req := httptest.NewRequest("GET", "/data", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Api-Key", "wrong")
+		if match(r, req) {
+			t.Error("should not match when one header differs")
+		}
+	})
+}
+
 func TestMatchMethodNormalization(t *testing.T) {
 	rule := &Rule{
 		Request: Request{

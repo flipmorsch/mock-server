@@ -22,9 +22,10 @@ type Rule struct {
 }
 
 type Request struct {
-	Method   string `yaml:"method"`
-	Path     string `yaml:"path"`
-	PathMode string `yaml:"path_mode"`
+	Method   string            `yaml:"method"`
+	Path     string            `yaml:"path"`
+	PathMode string            `yaml:"path_mode"`
+	Headers  map[string]string `yaml:"headers"`
 }
 
 type Response struct {
@@ -81,6 +82,13 @@ func (c *Config) validate() error {
 				canonical[http.CanonicalHeaderKey(k)] = v
 			}
 			rule.Response.Headers = canonical
+		}
+		if rule.Request.Headers != nil {
+			canonical := make(map[string]string, len(rule.Request.Headers))
+			for k, v := range rule.Request.Headers {
+				canonical[http.CanonicalHeaderKey(k)] = v
+			}
+			rule.Request.Headers = canonical
 		}
 		if rule.Response.Body != "" && rule.Response.BodyFile != "" {
 			return fmt.Errorf("rule %d (%q): body and body_file are mutually exclusive", i+1, rule.Name)

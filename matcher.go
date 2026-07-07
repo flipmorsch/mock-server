@@ -11,6 +11,12 @@ func match(rule *Rule, r *http.Request) bool {
 		return false
 	}
 
+	for k, v := range rule.Request.Headers {
+		if r.Header.Get(k) != v {
+			return false
+		}
+	}
+
 	mode := rule.Request.PathMode
 	if mode == "" {
 		mode = "exact"

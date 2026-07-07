@@ -237,6 +237,36 @@ rules:
 	}
 }
 
+func TestLoadConfigRequestHeaderCanonicalization(t *testing.T) {
+	yaml := `
+rules:
+  - name: "test"
+    request:
+      method: GET
+      path: /
+      headers:
+        content-type: application/json
+        x-custom-header: value
+    response:
+      status: 200
+`
+	tmp := writeTemp(t, "config*.yaml", yaml)
+	defer os.Remove(tmp)
+
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	h := cfg.Rules[0].Request.Headers
+	if h["Content-Type"] != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", h["Content-Type"])
+	}
+	if h["X-Custom-Header"] != "value" {
+		t.Errorf("X-Custom-Header = %q, want value", h["X-Custom-Header"])
+	}
+}
+
 func TestLoadConfigBodyFile(t *testing.T) {
 	bodyContent := `{"from": "file"}`
 	bodyFile := writeTemp(t, "body*.json", bodyContent)
