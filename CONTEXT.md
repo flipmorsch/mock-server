@@ -4,7 +4,7 @@
 A mapping from an HTTP request pattern (method, URL path, headers, query parameters, body) to a pre-configured mock HTTP response. All specified criteria of a Rule must match for the Rule to trigger (AND semantics). When multiple Rules match a request, the first one defined takes precedence (first-match-wins).
 
 
-All match dimensions are now implemented: method, path (exact, prefix, regex), headers, query parameters, and body. Latency simulation, dynamic responses, and runtime configuration remain deferred.
+All match dimensions, latency simulation, and dynamic responses are implemented. Runtime configuration, TLS, and hot reload remain deferred.
 
 ### Path Matching
 A Rule's URL path can be matched in one of three modes, chosen per-Rule:
@@ -22,7 +22,13 @@ Body matching supports two modes, chosen per-Rule:
 Defaults to exact if mode is omitted.
 
 ### Response
-A Rule's response is static: HTTP status code, headers, and body. No templating, latency simulation, or dynamic generation. The body is specified via `body` (inline string) or `body_file` (path to a file read at startup), mutually exclusive. If no `Content-Type` header is specified, the server sets `Content-Type: text/plain; charset=utf-8`.
+A Rule's response specifies an HTTP status code, optional headers, and a body (inline `body` or via `body_file`, mutually exclusive). If no `Content-Type` header is specified, the server sets `Content-Type: text/plain; charset=utf-8`.
+
+### Latency
+A Rule may include a `delay` field (e.g. `500ms`, `2s`) to simulate network latency. The server sleeps for the specified duration before writing the response.
+
+### Dynamic Responses
+A Rule with `template: true` processes its body through Go's `text/template`. Available data: `{{.Method}}`, `{{.Path}}`, `{{.Body}}`, `{{.Header "X"}}`, `{{.Query "k"}}`. Custom functions: `now`, `nowFormat`, `randomInt`, `randomString`, `counter`. Without the template flag, the body is served as a literal string.
 
 ### Unmatched Requests
 Requests matching no Rule receive HTTP 404 with no body. Users can simulate a default response by placing a Rule with no match criteria at the end of their Rule list.
