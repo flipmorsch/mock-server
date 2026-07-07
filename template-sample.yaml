@@ -1,0 +1,29 @@
+listen: "127.0.0.1:8080"
+
+rules:
+  - name: "echo"
+    request:
+      method: GET
+      path: /echo
+    response:
+      status: 200
+      template: true
+      body: "{{.Method}} {{.Path}} — query page={{.Query \"page\"}}"
+
+  - name: "counter"
+    request:
+      method: GET
+      path: /count
+    response:
+      status: 200
+      template: true
+      body: "request #{{counter}} at {{now}}"
+
+  - name: "rand"
+    request:
+      method: GET
+      path: /rand
+    response:
+      status: 200
+      template: true
+      body: "{{randomString 8}}"

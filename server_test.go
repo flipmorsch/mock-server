@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -246,5 +247,165 @@ func TestServerDelay(t *testing.T) {
 	}
 	if elapsed < 50*time.Millisecond {
 		t.Errorf("elapsed = %v, want at least 50ms", elapsed)
+	}
+}
+
+func TestServerTemplateMethodAndPath(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "echo",
+				Request: Request{
+					Method: "GET",
+					Path:   "/echo",
+				},
+				Response: Response{
+					Status:   200,
+					Template: true,
+					Body:     "{{.Method}} {{.Path}}",
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+	req := httptest.NewRequest("GET", "/echo?foo=bar", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Body.String() != "GET /echo" {
+		t.Errorf("body = %q, want 'GET /echo'", w.Body.String())
+	}
+}
+
+func TestServerTemplateBodyEcho(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "echo body",
+				Request: Request{
+					Method: "POST",
+					Path:   "/echo",
+				},
+				Response: Response{
+					Status:   200,
+					Template: true,
+					Body:     "received: {{.Body}}",
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+	req := httptest.NewRequest("POST", "/echo", strings.NewReader(`{"key":"val"}`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Body.String() != `received: {"key":"val"}` {
+		t.Errorf("body = %q, want 'received: {\"key\":\"val\"}'", w.Body.String())
+	}
+}
+
+func TestServerTemplateHeaderAndQuery(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "header query",
+				Request: Request{
+					Method: "GET",
+					Path:   "/info",
+				},
+				Response: Response{
+					Status:   200,
+					Template: true,
+					Body:     "{{.Header \"X-Test\"}} {{.Query \"page\"}}",
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+	req := httptest.NewRequest("GET", "/info?page=3", nil)
+	req.Header.Set("X-Test", "hello")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Body.String() != "hello 3" {
+		t.Errorf("body = %q, want 'hello 3'", w.Body.String())
+	}
+}
+
+func TestServerTemplateFunctions(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "funcs",
+				Request: Request{
+					Method: "GET",
+					Path:   "/funcs",
+				},
+				Response: Response{
+					Status:   200,
+					Template: true,
+					Body:     "{{counter}} {{randomInt 1 1}} {{randomString 5}}",
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+
+	req1 := httptest.NewRequest("GET", "/funcs", nil)
+	w1 := httptest.NewRecorder()
+	h.ServeHTTP(w1, req1)
+
+	parts1 := strings.SplitN(w1.Body.String(), " ", 3)
+	if len(parts1) != 3 {
+		t.Fatalf("unexpected body format: %q", w1.Body.String())
+	}
+	if parts1[0] != "1" {
+		t.Errorf("first counter = %q, want 1", parts1[0])
+	}
+	if parts1[1] != "1" {
+		t.Errorf("randomInt(1,1) = %q, want 1", parts1[1])
+	}
+	if len(parts1[2]) != 5 {
+		t.Errorf("randomString(5) length = %d, want 5", len(parts1[2]))
+	}
+
+	req2 := httptest.NewRequest("GET", "/funcs", nil)
+	w2 := httptest.NewRecorder()
+	h.ServeHTTP(w2, req2)
+
+	parts2 := strings.SplitN(w2.Body.String(), " ", 3)
+	if parts2[0] != "2" {
+		t.Errorf("second counter = %q, want 2", parts2[0])
+	}
+}
+
+func TestServerTemplateNoTemplateFlag(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "literal",
+				Request: Request{
+					Method: "GET",
+					Path:   "/literal",
+				},
+				Response: Response{
+					Status: 200,
+					Body:   "{{.Method}} is literal",
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+	req := httptest.NewRequest("GET", "/literal", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Body.String() != "{{.Method}} is literal" {
+		t.Errorf("body = %q, want literal template string", w.Body.String())
 	}
 }

@@ -42,6 +42,7 @@ type Response struct {
 	Body          string            `yaml:"body"`
 	BodyFile      string            `yaml:"body_file"`
 	Delay         string            `yaml:"delay"`
+	Template      bool              `yaml:"template"`
 	delayDuration time.Duration
 }
 

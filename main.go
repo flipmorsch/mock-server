@@ -71,7 +71,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(rule.Response.delayDuration)
 			}
 			log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, rule.Response.Status, rule.Name)
-			writeResponse(w, &rule.Response)
+			writeResponse(w, &rule.Response, r, body)
 			return
 		}
 	}
@@ -80,7 +80,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func writeResponse(w http.ResponseWriter, resp *Response) {
+func writeResponse(w http.ResponseWriter, resp *Response, r *http.Request, reqBody []byte) {
 	for k, v := range resp.Headers {
 		w.Header().Set(k, v)
 	}
@@ -88,7 +88,17 @@ func writeResponse(w http.ResponseWriter, resp *Response) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	}
 	w.WriteHeader(resp.Status)
-	if resp.Body != "" {
-		fmt.Fprint(w, resp.Body)
+	if resp.Body == "" {
+		return
 	}
+	body := resp.Body
+	if resp.Template {
+		var err error
+		body, err = executeTemplate(resp.Body, r, reqBody)
+		if err != nil {
+			log.Printf("template error: %v", err)
+			return
+		}
+	}
+	fmt.Fprint(w, body)
 }
