@@ -26,6 +26,7 @@ type Request struct {
 	Path     string            `yaml:"path"`
 	PathMode string            `yaml:"path_mode"`
 	Headers  map[string]string `yaml:"headers"`
+	Query    map[string]string `yaml:"query"`
 }
 
 type Response struct {

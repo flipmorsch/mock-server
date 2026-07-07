@@ -197,6 +197,47 @@ func TestMatchHeaders(t *testing.T) {
 	})
 }
 
+func TestMatchQueryParams(t *testing.T) {
+	rule := &Rule{
+		Request: Request{
+			Method: "GET",
+			Path:   "/search",
+			Query: map[string]string{
+				"q":    "golang",
+				"page": "1",
+			},
+		},
+	}
+
+	t.Run("all params match", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/search?q=golang&page=1", nil)
+		if !match(rule, req) {
+			t.Error("should match when all query params match")
+		}
+	})
+
+	t.Run("missing param", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/search?q=golang", nil)
+		if match(rule, req) {
+			t.Error("should not match when required param is missing")
+		}
+	})
+
+	t.Run("wrong param value", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/search?q=golang&page=2", nil)
+		if match(rule, req) {
+			t.Error("should not match when param value differs")
+		}
+	})
+
+	t.Run("extra params still match", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/search?q=golang&page=1&sort=asc", nil)
+		if !match(rule, req) {
+			t.Error("should match even with extra query params")
+		}
+	})
+}
+
 func TestMatchMethodNormalization(t *testing.T) {
 	rule := &Rule{
 		Request: Request{

@@ -17,6 +17,12 @@ func match(rule *Rule, r *http.Request) bool {
 		}
 	}
 
+	for k, v := range rule.Request.Query {
+		if r.URL.Query().Get(k) != v {
+			return false
+		}
+	}
+
 	mode := rule.Request.PathMode
 	if mode == "" {
 		mode = "exact"
