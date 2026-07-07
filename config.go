@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -36,10 +37,12 @@ type BodyMatch struct {
 }
 
 type Response struct {
-	Status   int               `yaml:"status"`
-	Headers  map[string]string `yaml:"headers"`
-	Body     string            `yaml:"body"`
-	BodyFile string            `yaml:"body_file"`
+	Status        int               `yaml:"status"`
+	Headers       map[string]string `yaml:"headers"`
+	Body          string            `yaml:"body"`
+	BodyFile      string            `yaml:"body_file"`
+	Delay         string            `yaml:"delay"`
+	delayDuration time.Duration
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -115,6 +118,13 @@ func (c *Config) validate() error {
 				return fmt.Errorf("rule %d (%q): reading body_file %q: %w", i+1, rule.Name, rule.Response.BodyFile, err)
 			}
 			rule.Response.Body = string(bodyData)
+		}
+		if rule.Response.Delay != "" {
+			d, err := time.ParseDuration(rule.Response.Delay)
+			if err != nil {
+				return fmt.Errorf("rule %d (%q): invalid delay %q: %w", i+1, rule.Name, rule.Response.Delay, err)
+			}
+			rule.Response.delayDuration = d
 		}
 		rule.Response.BodyFile = ""
 		c.Rules[i] = rule

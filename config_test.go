@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestLoadConfigValid(t *testing.T) {
@@ -345,6 +346,53 @@ rules:
 	}
 	if h["X-Custom-Header"] != "value" {
 		t.Errorf("X-Custom-Header = %q, want value", h["X-Custom-Header"])
+	}
+}
+
+func TestLoadConfigDelay(t *testing.T) {
+	yaml := `
+rules:
+  - name: "slow"
+    request:
+      method: GET
+      path: /slow
+    response:
+      status: 200
+      delay: 500ms
+      body: ok
+`
+	tmp := writeTemp(t, "config*.yaml", yaml)
+	defer os.Remove(tmp)
+
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Rules[0].Response.Delay != "500ms" {
+		t.Errorf("delay = %q, want 500ms", cfg.Rules[0].Response.Delay)
+	}
+	if cfg.Rules[0].Response.delayDuration != 500*time.Millisecond {
+		t.Errorf("delayDuration = %v, want 500ms", cfg.Rules[0].Response.delayDuration)
+	}
+}
+
+func TestLoadConfigDelayInvalid(t *testing.T) {
+	yaml := `
+rules:
+  - name: "bad delay"
+    request:
+      method: GET
+      path: /
+    response:
+      status: 200
+      delay: not-a-duration
+`
+	tmp := writeTemp(t, "config*.yaml", yaml)
+	defer os.Remove(tmp)
+
+	_, err := LoadConfig(tmp)
+	if err == nil {
+		t.Fatal("expected error for invalid delay")
 	}
 }
 

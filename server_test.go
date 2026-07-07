@@ -3,6 +3,7 @@ package main
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestServerMatchedRule(t *testing.T) {
@@ -208,5 +209,42 @@ func TestServerMethodMismatch(t *testing.T) {
 
 	if w.Code != 404 {
 		t.Errorf("POST to GET-only rule: status = %d, want 404", w.Code)
+	}
+}
+
+func TestServerDelay(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "slow",
+				Request: Request{
+					Method: "GET",
+					Path:   "/slow",
+				},
+				Response: Response{
+					Status:        200,
+					Body:          "delayed",
+					delayDuration: 50 * time.Millisecond,
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+	req := httptest.NewRequest("GET", "/slow", nil)
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	h.ServeHTTP(w, req)
+	elapsed := time.Since(start)
+
+	if w.Code != 200 {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if w.Body.String() != "delayed" {
+		t.Errorf("body = %q, want delayed", w.Body.String())
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("elapsed = %v, want at least 50ms", elapsed)
 	}
 }

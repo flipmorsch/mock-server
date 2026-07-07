@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 const version = "0.2.0"
@@ -66,6 +67,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for i := range h.config.Rules {
 		rule := &h.config.Rules[i]
 		if match(rule, r, body) {
+			if rule.Response.delayDuration > 0 {
+				time.Sleep(rule.Response.delayDuration)
+			}
 			log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, rule.Response.Status, rule.Name)
 			writeResponse(w, &rule.Response)
 			return
