@@ -1,0 +1,33 @@
+listen: "127.0.0.1:8080"
+
+rules:
+  - name: "get users"
+    request:
+      method: GET
+      path: /users
+      path_mode: exact
+    response:
+      status: 200
+      headers:
+        content-type: application/json
+      body: |
+        [{"id": 1, "name": "Alice"}]
+
+  - name: "create user"
+    request:
+      method: POST
+      path: /users
+      path_mode: exact
+    response:
+      status: 201
+      body: |
+        {"id": 2, "name": "Bob"}
+
+  - name: "health check"
+    request:
+      method: GET
+      path: /health
+      path_mode: exact
+    response:
+      status: 200
+      body: OK
