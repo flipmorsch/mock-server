@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -58,11 +59,13 @@ type handler struct {
 func newHandler(cfg *Config) http.Handler {
 	return &handler{config: cfg}
 }
-
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+
 	for i := range h.config.Rules {
 		rule := &h.config.Rules[i]
-		if match(rule, r) {
+		if match(rule, r, body) {
 			log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, rule.Response.Status, rule.Name)
 			writeResponse(w, &rule.Response)
 			return

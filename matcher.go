@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func match(rule *Rule, r *http.Request) bool {
+func match(rule *Rule, r *http.Request, body []byte) bool {
 	if normalizeMethod(rule.Request.Method) != normalizeMethod(r.Method) {
 		return false
 	}
@@ -20,6 +20,20 @@ func match(rule *Rule, r *http.Request) bool {
 	for k, v := range rule.Request.Query {
 		if r.URL.Query().Get(k) != v {
 			return false
+		}
+	}
+
+	if rule.Request.Body != nil {
+		bodyStr := string(body)
+		switch rule.Request.Body.Mode {
+		case "exact":
+			if bodyStr != rule.Request.Body.Value {
+				return false
+			}
+		case "contains":
+			if !strings.Contains(bodyStr, rule.Request.Body.Value) {
+				return false
+			}
 		}
 	}
 

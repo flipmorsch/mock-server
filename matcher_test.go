@@ -1,7 +1,9 @@
 package main
 
 import (
+	"io"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -31,7 +33,7 @@ func TestMatchExactMethodAndPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, nil)
-			got := match(rule, req)
+			got := match(rule, req, nil)
 			if got != tt.want {
 				t.Errorf("match(%s %s) = %v, want %v", tt.method, tt.path, got, tt.want)
 			}
@@ -48,12 +50,12 @@ func TestMatchDefaultPathModeIsExact(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("GET", "/users", nil)
-	if !match(rule, req) {
+	if !match(rule, req, nil) {
 		t.Error("match should default to exact path mode")
 	}
 
 	req = httptest.NewRequest("GET", "/users/42", nil)
-	if match(rule, req) {
+	if match(rule, req, nil) {
 		t.Error("match should not match subpath in exact mode")
 	}
 }
@@ -83,7 +85,7 @@ func TestMatchPrefixPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", tt.path, nil)
-			got := match(rule, req)
+			got := match(rule, req, nil)
 			if got != tt.want {
 				t.Errorf("match(GET %s) = %v, want %v", tt.path, got, tt.want)
 			}
@@ -116,7 +118,7 @@ func TestMatchRegexPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", tt.path, nil)
-			got := match(rule, req)
+			got := match(rule, req, nil)
 			if got != tt.want {
 				t.Errorf("match(GET %s) = %v, want %v", tt.path, got, tt.want)
 			}
@@ -138,14 +140,14 @@ func TestMatchHeaders(t *testing.T) {
 	t.Run("matching header", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "/submit", nil)
 		req.Header.Set("Content-Type", "application/json")
-		if !match(rule, req) {
+		if !match(rule, req, nil) {
 			t.Error("should match when header value matches")
 		}
 	})
 
 	t.Run("missing header", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "/submit", nil)
-		if match(rule, req) {
+		if match(rule, req, nil) {
 			t.Error("should not match when required header is missing")
 		}
 	})
@@ -153,7 +155,7 @@ func TestMatchHeaders(t *testing.T) {
 	t.Run("wrong header value", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "/submit", nil)
 		req.Header.Set("Content-Type", "text/plain")
-		if match(rule, req) {
+		if match(rule, req, nil) {
 			t.Error("should not match when header value differs")
 		}
 	})
@@ -172,7 +174,7 @@ func TestMatchHeaders(t *testing.T) {
 		req := httptest.NewRequest("GET", "/data", nil)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Api-Key", "secret")
-		if !match(r, req) {
+		if !match(r, req, nil) {
 			t.Error("should match when all headers match")
 		}
 	})
@@ -191,7 +193,7 @@ func TestMatchHeaders(t *testing.T) {
 		req := httptest.NewRequest("GET", "/data", nil)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Api-Key", "wrong")
-		if match(r, req) {
+		if match(r, req, nil) {
 			t.Error("should not match when one header differs")
 		}
 	})
@@ -211,29 +213,111 @@ func TestMatchQueryParams(t *testing.T) {
 
 	t.Run("all params match", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/search?q=golang&page=1", nil)
-		if !match(rule, req) {
+		if !match(rule, req, nil) {
 			t.Error("should match when all query params match")
 		}
 	})
 
 	t.Run("missing param", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/search?q=golang", nil)
-		if match(rule, req) {
+		if match(rule, req, nil) {
 			t.Error("should not match when required param is missing")
 		}
 	})
 
 	t.Run("wrong param value", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/search?q=golang&page=2", nil)
-		if match(rule, req) {
+		if match(rule, req, nil) {
 			t.Error("should not match when param value differs")
 		}
 	})
 
 	t.Run("extra params still match", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/search?q=golang&page=1&sort=asc", nil)
-		if !match(rule, req) {
+		if !match(rule, req, nil) {
 			t.Error("should match even with extra query params")
+		}
+	})
+}
+
+func TestMatchBody(t *testing.T) {
+	t.Run("exact match", func(t *testing.T) {
+		rule := &Rule{
+			Request: Request{
+				Method: "POST",
+				Path:   "/submit",
+				Body:   &BodyMatch{Mode: "exact", Value: `{"key":"val"}`},
+			},
+		}
+		req := httptest.NewRequest("POST", "/submit", strings.NewReader(`{"key":"val"}`))
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+		if !match(rule, req, body) {
+			t.Error("should match exact body")
+		}
+	})
+
+	t.Run("exact mismatch", func(t *testing.T) {
+		rule := &Rule{
+			Request: Request{
+				Method: "POST",
+				Path:   "/submit",
+				Body:   &BodyMatch{Mode: "exact", Value: `{"key":"val"}`},
+			},
+		}
+		req := httptest.NewRequest("POST", "/submit", strings.NewReader(`{"other":1}`))
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+		if match(rule, req, body) {
+			t.Error("should not match different body")
+		}
+	})
+
+	t.Run("contains match", func(t *testing.T) {
+		rule := &Rule{
+			Request: Request{
+				Method: "POST",
+				Path:   "/submit",
+				Body:   &BodyMatch{Mode: "contains", Value: `"name"`},
+			},
+		}
+		req := httptest.NewRequest("POST", "/submit", strings.NewReader(`{"name":"Bob","age":30}`))
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+		if !match(rule, req, body) {
+			t.Error("should match when body contains value")
+		}
+	})
+
+	t.Run("contains not found", func(t *testing.T) {
+		rule := &Rule{
+			Request: Request{
+				Method: "POST",
+				Path:   "/submit",
+				Body:   &BodyMatch{Mode: "contains", Value: `"missing"`},
+			},
+		}
+		req := httptest.NewRequest("POST", "/submit", strings.NewReader(`{"key":"val"}`))
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+		if match(rule, req, body) {
+			t.Error("should not match when body does not contain value")
+		}
+	})
+
+	t.Run("default mode is exact", func(t *testing.T) {
+		rule := &Rule{
+			Request: Request{
+				Method: "POST",
+				Path:   "/submit",
+				Body:   &BodyMatch{Value: "hello"},
+			},
+		}
+		req := httptest.NewRequest("POST", "/submit", strings.NewReader("hello"))
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+		if !match(rule, req, body) {
+			t.Error("default mode should be exact")
 		}
 	})
 }
@@ -247,7 +331,7 @@ func TestMatchMethodNormalization(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/submit", nil)
-	if !match(rule, req) {
+	if !match(rule, req, nil) {
 		t.Error("trimmed method should match")
 	}
 }
@@ -261,7 +345,7 @@ func TestMatchQueryStringIgnored(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("GET", "/users?page=2", nil)
-	if !match(rule, req) {
+	if !match(rule, req, nil) {
 		t.Error("query string should not affect exact path matching")
 	}
 }

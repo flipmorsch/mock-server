@@ -27,6 +27,12 @@ type Request struct {
 	PathMode string            `yaml:"path_mode"`
 	Headers  map[string]string `yaml:"headers"`
 	Query    map[string]string `yaml:"query"`
+	Body     *BodyMatch        `yaml:"body"`
+}
+
+type BodyMatch struct {
+	Mode  string `yaml:"mode"`
+	Value string `yaml:"value"`
 }
 
 type Response struct {
@@ -90,6 +96,15 @@ func (c *Config) validate() error {
 				canonical[http.CanonicalHeaderKey(k)] = v
 			}
 			rule.Request.Headers = canonical
+		}
+		if rule.Request.Body != nil {
+			switch rule.Request.Body.Mode {
+			case "exact", "contains":
+			case "":
+				rule.Request.Body.Mode = "exact"
+			default:
+				return fmt.Errorf("rule %d (%q): unsupported body mode %q (supported: exact, contains)", i+1, rule.Name, rule.Request.Body.Mode)
+			}
 		}
 		if rule.Response.Body != "" && rule.Response.BodyFile != "" {
 			return fmt.Errorf("rule %d (%q): body and body_file are mutually exclusive", i+1, rule.Name)
