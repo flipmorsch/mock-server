@@ -409,3 +409,123 @@ func TestServerTemplateNoTemplateFlag(t *testing.T) {
 		t.Errorf("body = %q, want literal template string", w.Body.String())
 	}
 }
+
+func TestServerTemplateParseError(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "bad template",
+				Request: Request{
+					Method: "GET",
+					Path:   "/bad",
+				},
+				Response: Response{
+					Status:   200,
+					Template: true,
+					Body:     "{{.NosuchField}",
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+	req := httptest.NewRequest("GET", "/bad", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("status = %d, want 200 (headers written before template error)", w.Code)
+	}
+	if w.Body.String() != "" {
+		t.Errorf("body should be empty on template error, got %q", w.Body.String())
+	}
+}
+
+func TestServerTemplateWithBodyFile(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "templated file",
+				Request: Request{
+					Method: "GET",
+					Path:   "/tplfile",
+				},
+				Response: Response{
+					Status:   200,
+					Template: true,
+					Body:     "path={{.Path}} method={{.Method}}",
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+	req := httptest.NewRequest("GET", "/tplfile", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Body.String() != "path=/tplfile method=GET" {
+		t.Errorf("body = %q, want 'path=/tplfile method=GET'", w.Body.String())
+	}
+}
+
+func TestServerDelayAndTemplate(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "slow template",
+				Request: Request{
+					Method: "GET",
+					Path:   "/slowtpl",
+				},
+				Response: Response{
+					Status:        200,
+					Template:      true,
+					delayDuration: 10 * time.Millisecond,
+					Body:          "{{.Method}}",
+				},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+	req := httptest.NewRequest("GET", "/slowtpl", nil)
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	h.ServeHTTP(w, req)
+	elapsed := time.Since(start)
+
+	if w.Body.String() != "GET" {
+		t.Errorf("body = %q, want GET", w.Body.String())
+	}
+	if elapsed < 10*time.Millisecond {
+		t.Errorf("elapsed = %v, want at least 10ms", elapsed)
+	}
+}
+
+func TestServerNoMatchWithBody(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "body rule",
+				Request: Request{
+					Method: "POST",
+					Path:   "/submit",
+					Body:   &BodyMatch{Mode: "exact", Value: "expected"},
+				},
+				Response: Response{Status: 200, Body: "ok"},
+			},
+		},
+	}
+
+	h := newHandler(cfg)
+
+	req := httptest.NewRequest("POST", "/submit", strings.NewReader("wrong body"))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404 for non-matching body", w.Code)
+	}
+}

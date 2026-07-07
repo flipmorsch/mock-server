@@ -396,6 +396,44 @@ rules:
 	}
 }
 
+func TestLoadConfigMalformedYaml(t *testing.T) {
+	tmp := writeTemp(t, "config*.yaml", "this: is: not: valid: yaml: [")
+	defer os.Remove(tmp)
+
+	_, err := LoadConfig(tmp)
+	if err == nil {
+		t.Fatal("expected error for malformed YAML")
+	}
+}
+
+func TestListenAddrDefault(t *testing.T) {
+	cfg := &Config{}
+	if addr := cfg.listenAddr(); addr != "127.0.0.1:8080" {
+		t.Errorf("default listenAddr = %q, want 127.0.0.1:8080", addr)
+	}
+}
+
+func TestListenAddrCustom(t *testing.T) {
+	cfg := &Config{Listen: "0.0.0.0:3000"}
+	if addr := cfg.listenAddr(); addr != "0.0.0.0:3000" {
+		t.Errorf("custom listenAddr = %q, want 0.0.0.0:3000", addr)
+	}
+}
+
+func TestLoadConfigEmptyRules(t *testing.T) {
+	yaml := `listen: "127.0.0.1:9090"`
+	tmp := writeTemp(t, "config*.yaml", yaml)
+	defer os.Remove(tmp)
+
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Rules) != 0 {
+		t.Errorf("expected 0 rules, got %d", len(cfg.Rules))
+	}
+}
+
 func writeTemp(t *testing.T, pattern, content string) string {
 	t.Helper()
 	f, err := os.CreateTemp("", pattern)

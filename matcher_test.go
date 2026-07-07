@@ -322,6 +322,56 @@ func TestMatchBody(t *testing.T) {
 	})
 }
 
+func TestMatchBodyEdgeCases(t *testing.T) {
+	t.Run("exact match with empty body", func(t *testing.T) {
+		rule := &Rule{
+			Request: Request{
+				Method: "POST",
+				Path:   "/submit",
+				Body:   &BodyMatch{Mode: "exact", Value: ""},
+			},
+		}
+		req := httptest.NewRequest("POST", "/submit", strings.NewReader(""))
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+		if !match(rule, req, body) {
+			t.Error("should match empty body exactly")
+		}
+	})
+
+	t.Run("contains match with empty value", func(t *testing.T) {
+		rule := &Rule{
+			Request: Request{
+				Method: "POST",
+				Path:   "/submit",
+				Body:   &BodyMatch{Mode: "contains", Value: ""},
+			},
+		}
+		req := httptest.NewRequest("POST", "/submit", strings.NewReader("anything"))
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+		if !match(rule, req, body) {
+			t.Error("empty string should be contained in any body")
+		}
+	})
+
+	t.Run("body match with no body in request", func(t *testing.T) {
+		rule := &Rule{
+			Request: Request{
+				Method: "GET",
+				Path:   "/get",
+				Body:   &BodyMatch{Mode: "exact", Value: "something"},
+			},
+		}
+		req := httptest.NewRequest("GET", "/get", nil)
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+		if match(rule, req, body) {
+			t.Error("should not match when rule requires body but request has none")
+		}
+	})
+}
+
 func TestMatchMethodNormalization(t *testing.T) {
 	rule := &Rule{
 		Request: Request{
