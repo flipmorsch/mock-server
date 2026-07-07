@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -44,7 +45,7 @@ func main() {
 		addr = *listenOverride
 	}
 
-	handler := newHandler(cfg)
+	handler := newHandler(cfg, &Journal{})
 
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, handler); err != nil {
@@ -54,15 +55,27 @@ func main() {
 }
 
 type handler struct {
-	config *Config
+	config  *Config
+	journal *Journal
 }
 
-func newHandler(cfg *Config) http.Handler {
-	return &handler{config: cfg}
+func newHandler(cfg *Config, journal *Journal) http.Handler {
+	return &handler{config: cfg, journal: journal}
 }
+
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/__admin/") {
+		adminHandler(h.journal)(w, r)
+		return
+	}
+
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
+
+	reqHeaders := make(map[string]string)
+	for k := range r.Header {
+		reqHeaders[http.CanonicalHeaderKey(k)] = r.Header.Get(k)
+	}
 
 	for i := range h.config.Rules {
 		rule := &h.config.Rules[i]
@@ -71,16 +84,18 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(rule.Response.delayDuration)
 			}
 			log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, rule.Response.Status, rule.Name)
-			writeResponse(w, &rule.Response, r, body)
+			h.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, rule.Name, rule.Response.Status)
+			writeResponse(w, &rule.Response, r, body, h.journal)
 			return
 		}
 	}
 
 	log.Printf("%s %s → 404 (no match)", r.Method, r.URL.Path)
+	h.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, "", 404)
 	http.NotFound(w, r)
 }
 
-func writeResponse(w http.ResponseWriter, resp *Response, r *http.Request, reqBody []byte) {
+func writeResponse(w http.ResponseWriter, resp *Response, r *http.Request, reqBody []byte, journal *Journal) {
 	for k, v := range resp.Headers {
 		w.Header().Set(k, v)
 	}
@@ -94,7 +109,7 @@ func writeResponse(w http.ResponseWriter, resp *Response, r *http.Request, reqBo
 	body := resp.Body
 	if resp.Template {
 		var err error
-		body, err = executeTemplate(resp.Body, r, reqBody)
+		body, err = executeTemplate(resp.Body, r, reqBody, journal)
 		if err != nil {
 			log.Printf("template error: %v", err)
 			return
