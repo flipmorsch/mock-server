@@ -91,6 +91,39 @@ func TestMatchPrefixPath(t *testing.T) {
 	}
 }
 
+func TestMatchRegexPath(t *testing.T) {
+	rule := &Rule{
+		Request: Request{
+			Method:   "GET",
+			Path:     `^/users/\d+$`,
+			PathMode: "regex",
+		},
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"numeric id", "/users/42", true},
+		{"multi-digit", "/users/12345", true},
+		{"alphabetic id", "/users/abc", false},
+		{"no id", "/users", false},
+		{"subpath", "/users/42/profile", false},
+		{"wrong path", "/other/42", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.path, nil)
+			got := match(rule, req)
+			if got != tt.want {
+				t.Errorf("match(GET %s) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchMethodNormalization(t *testing.T) {
 	rule := &Rule{
 		Request: Request{

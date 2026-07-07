@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -64,9 +65,15 @@ func (c *Config) validate() error {
 			mode = "exact"
 		}
 		switch mode {
-		case "exact", "prefix":
+		case "exact", "prefix", "regex":
 		default:
-			return fmt.Errorf("rule %d (%q): unsupported path_mode %q (supported: exact, prefix)", i+1, rule.Name, rule.Request.PathMode)
+			return fmt.Errorf("rule %d (%q): unsupported path_mode %q (supported: exact, prefix, regex)", i+1, rule.Name, rule.Request.PathMode)
+		}
+		if mode == "regex" {
+			_, err := regexp.Compile(rule.Request.Path)
+			if err != nil {
+				return fmt.Errorf("rule %d (%q): invalid regex pattern %q: %w", i+1, rule.Name, rule.Request.Path, err)
+			}
 		}
 		if rule.Response.Headers != nil {
 			canonical := make(map[string]string, len(rule.Response.Headers))

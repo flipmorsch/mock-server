@@ -156,7 +156,7 @@ rules:
     request:
       method: GET
       path: /
-      path_mode: regex
+      path_mode: glob
     response:
       status: 200
 `
@@ -190,6 +190,50 @@ rules:
 	}
 	if cfg.Rules[0].Request.PathMode != "prefix" {
 		t.Errorf("path_mode = %q, want prefix", cfg.Rules[0].Request.PathMode)
+	}
+}
+
+func TestLoadConfigRegexPathMode(t *testing.T) {
+	yaml := `
+rules:
+  - name: "regex rule"
+    request:
+      method: GET
+      path: "^/users/\\d+$"
+      path_mode: regex
+    response:
+      status: 200
+      body: ok
+`
+	tmp := writeTemp(t, "config*.yaml", yaml)
+	defer os.Remove(tmp)
+
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Rules[0].Request.PathMode != "regex" {
+		t.Errorf("path_mode = %q, want regex", cfg.Rules[0].Request.PathMode)
+	}
+}
+
+func TestLoadConfigRegexInvalid(t *testing.T) {
+	yaml := `
+rules:
+  - name: "bad regex"
+    request:
+      method: GET
+      path: "[unclosed"
+      path_mode: regex
+    response:
+      status: 200
+`
+	tmp := writeTemp(t, "config*.yaml", yaml)
+	defer os.Remove(tmp)
+
+	_, err := LoadConfig(tmp)
+	if err == nil {
+		t.Fatal("expected error for invalid regex pattern")
 	}
 }
 
