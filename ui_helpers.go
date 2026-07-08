@@ -8,3 +8,7 @@ func formatStatus(status int) string {
 	}
 	return strconv.Itoa(status)
 }
+
+func testInit(path string) string {
+	return `{ method: 'GET', path: '` + path + `', headers: '', body: '' }`
+}

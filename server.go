@@ -48,6 +48,9 @@ func cloneConfig(cfg *Config) *Config {
 	rules := make([]Rule, len(cfg.Rules))
 	for i, r := range cfg.Rules {
 		rules[i] = cloneRule(r)
+		if rules[i].ID == "" {
+			rules[i].ID = newUUID()
+		}
 	}
 	return &Config{
 		Listen: cfg.Listen,
