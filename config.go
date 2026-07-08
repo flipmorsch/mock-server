@@ -17,6 +17,7 @@ type Config struct {
 }
 
 type Rule struct {
+	ID       string   `yaml:"id"`
 	Name     string   `yaml:"name"`
 	Request  Request  `yaml:"request"`
 	Response Response `yaml:"response"`

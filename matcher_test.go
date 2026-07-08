@@ -422,7 +422,7 @@ func TestFirstMatchWins(t *testing.T) {
 		},
 	}
 
-	h := newHandler(cfg, &Journal{})
+	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
 	req := httptest.NewRequest("GET", "/resource", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)

@@ -11,13 +11,15 @@ import (
 	"time"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	listenOverride := flag.String("listen", "", "override listen address (e.g., 127.0.0.1:8080)")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	uiEnabled := flag.Bool("ui", false, "enable embedded Web UI at /_ui/")
+	fixturesDir := flag.String("fixtures-dir", "", "directory for uploaded fixture files (default: ./fixtures)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: mock-server [--listen addr:port] <config.yaml>\n")
+		fmt.Fprintf(os.Stderr, "Usage: mock-server [flags] <config.yaml>\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -26,7 +28,6 @@ func main() {
 		os.Exit(0)
 	}
 
-
 	if flag.NArg() < 1 {
 		flag.Usage()
 		os.Exit(1)
@@ -34,18 +35,31 @@ func main() {
 
 	configPath := flag.Arg(0)
 
-	cfg, err := LoadConfig(configPath)
+	var cfg *Config
+	var err error
+	if *uiEnabled {
+		cfg, err = loadOrEmpty(configPath)
+	} else {
+		cfg, err = LoadConfig(configPath)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	addr := cfg.listenAddr()
+	fixDir := *fixturesDir
+	if fixDir == "" {
+		fixDir = "./fixtures"
+	}
+
+	srv := newServer(cfg, configPath, &Journal{}, *uiEnabled, fixDir)
+
+	handler := newHandler(srv)
+
+	addr := srv.ListenAddr()
 	if *listenOverride != "" {
 		addr = *listenOverride
 	}
-
-	handler := newHandler(cfg, &Journal{})
 
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, handler); err != nil {
@@ -54,18 +68,33 @@ func main() {
 	}
 }
 
-type handler struct {
-	config  *Config
-	journal *Journal
+func loadOrEmpty(path string) (*Config, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return &Config{}, nil
+	}
+	return LoadConfig(path)
 }
 
-func newHandler(cfg *Config, journal *Journal) http.Handler {
-	return &handler{config: cfg, journal: journal}
+type handler struct {
+	srv *Server
+}
+
+func newHandler(srv *Server) http.Handler {
+	return &handler{srv: srv}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/_ui/") {
+		if !h.srv.uiEnabled {
+			http.NotFound(w, r)
+			return
+		}
+		uiHandler(h.srv)(w, r)
+		return
+	}
+
 	if strings.HasPrefix(r.URL.Path, "/__admin/") {
-		adminHandler(h.journal)(w, r)
+		adminHandler(h.srv.journal)(w, r)
 		return
 	}
 
@@ -77,21 +106,22 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reqHeaders[http.CanonicalHeaderKey(k)] = r.Header.Get(k)
 	}
 
-	for i := range h.config.Rules {
-		rule := &h.config.Rules[i]
+	rules := h.srv.Rules()
+	for i := range rules {
+		rule := &rules[i]
 		if match(rule, r, body) {
 			if rule.Response.delayDuration > 0 {
 				time.Sleep(rule.Response.delayDuration)
 			}
 			log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, rule.Response.Status, rule.Name)
-			h.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, rule.Name, rule.Response.Status)
-			writeResponse(w, &rule.Response, r, body, h.journal)
+			h.srv.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, rule.Name, rule.Response.Status)
+			writeResponse(w, &rule.Response, r, body, h.srv.journal)
 			return
 		}
 	}
 
 	log.Printf("%s %s → 404 (no match)", r.Method, r.URL.Path)
-	h.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, "", 404)
+	h.srv.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, "", 404)
 	http.NotFound(w, r)
 }
 
