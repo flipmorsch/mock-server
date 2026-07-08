@@ -53,6 +53,13 @@ Two test modes per Rule:
 ### Request Journal
 A live log of recent HTTP requests visible in the UI, stored as an in-memory ring buffer of the last 200 requests. Updates in real-time. No persistence.
 
+### Match Explanation
+A per-request diagnostic answering "why did this request get this response." For an unmatched request, it shows the Rules that came closest to matching, ranked by closeness, each with the exact match dimension that failed (expected vs. actual value). For a matched request, it identifies the winning Rule; the verdicts of earlier skipped Rules are available on demand (diagnosing an early broad Rule shadowing a later specific one under first-match-wins). Explanations appear on Journal entries and in dry-run results.
+
+Two actions close the loop from a Match Explanation:
+- **Jump-to-rule** — a near-miss links to its Rule, opening it for editing with the failing criterion highlighted.
+- **Rule-from-request** — an unmatched Journal entry can seed a new Rule, pre-filled from the captured request.
+
 ### Validation
 Rule fields are validated on blur (per-field) and at Save time (cross-field). Invalid fields show inline errors. The server validates the entire configuration on Save and rejects invalid saves.
 
@@ -67,10 +74,10 @@ External modifications to the config file while the server is running are not de
 A preview panel renders the Rule's template body against user-supplied sample data (method, path, headers, body), available when `template: true` is set. Default sample: `GET /sample` with empty body and headers.
 
 ### Technology
-Built with server-rendered HTML using [Templ](https://templ.guide) components and [htmx](https://htmx.org) for interactivity. Drag-and-drop reordering uses [Alpine.js](https://alpinejs.dev). Styling via Tailwind CSS (standalone CLI, no JS build). All static assets are embedded via `//go:embed`.
+Built with server-rendered HTML using [Templ](https://templ.guide) components and [htmx](https://htmx.org) for interactivity. Drag-and-drop reordering uses [Alpine.js](https://alpinejs.dev). Styling via a hand-written embedded stylesheet (no CSS framework, no build step beyond `templ generate`). All static assets are embedded via `//go:embed`.
 
 ### API
-The UI communicates with the server through REST endpoints under `/_ui/api/` returning JSON and htmx partial endpoints under `/_ui/partials/` returning HTML fragments. The server uses Go 1.22+ `net/http` enhanced ServeMux for routing (no external router dependency).
+The UI communicates with the server through form-encoded endpoints under `/_ui/api/` returning HTML fragments (plus `HX-Trigger` events for cross-surface updates), htmx partial endpoints under `/_ui/partials/`, and a Server-Sent Events stream at `/_ui/api/events` feeding the live Journal. The programmatic JSON API lives under `/__admin/`. The server uses Go 1.22+ `net/http` enhanced ServeMux for routing (no external router dependency).
 
 ## Configuration
 Rules are defined in a YAML configuration file. The server reads this file at startup and writes to it when the user saves via the Web UI. The `listen` address is configurable both in the file and through the UI.

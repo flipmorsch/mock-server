@@ -23,6 +23,13 @@ type Server struct {
 }
 
 func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled bool) *Server {
+	// IDs must exist on the serving config too: Match Explanations carry
+	// them for jump-to-rule links.
+	for i := range cfg.Rules {
+		if cfg.Rules[i].ID == "" {
+			cfg.Rules[i].ID = newID()
+		}
+	}
 	return &Server{
 		config:      cfg,
 		workingCopy: cloneConfig(cfg),
@@ -159,6 +166,13 @@ func (s *Server) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// The file keeps the user's body_file references and raw delay strings;
+	// the serving copy gets the normalized form (inlined bodies, parsed delays).
+	serving := cloneConfig(s.workingCopy)
+	if err := serving.Validate(); err != nil {
+		return err
+	}
+
 	data, err := yaml.Marshal(s.workingCopy)
 	if err != nil {
 		return fmt.Errorf("serialization failed: %w", err)
@@ -168,7 +182,7 @@ func (s *Server) Save() error {
 		return fmt.Errorf("write failed: %w", err)
 	}
 
-	s.config = cloneConfig(s.workingCopy)
+	s.config = serving
 	s.unsaved = false
 	return nil
 }
@@ -180,13 +194,19 @@ func (s *Server) UIEnabled() bool {
 	return s.uiEnabled
 }
 
-func (s *Server) MatchRule(r *http.Request, body []byte) (*rule.Rule, bool) {
+// MatchRule walks the serving rules in order. It returns the first match
+// (nil if none) plus the verdicts of every rule evaluated and missed along
+// the way — the raw material for Match Explanations.
+func (s *Server) MatchRule(r *http.Request, body []byte) (*rule.Rule, []rule.RuleVerdict) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	var misses []rule.RuleVerdict
 	for i := range s.config.Rules {
-		if rule.Match(&s.config.Rules[i], r, body) {
-			return &s.config.Rules[i], true
+		rv := rule.Explain(&s.config.Rules[i], r, body)
+		if rv.Matched {
+			return &s.config.Rules[i], misses
 		}
+		misses = append(misses, rv)
 	}
-	return nil, false
+	return nil, misses
 }

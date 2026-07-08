@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -10,7 +10,7 @@ import (
 )
 
 // ---------------------------------------------------------------
-// Go helpers for Alpine.js initialization data
+// Go helpers
 // ---------------------------------------------------------------
 
 func jsStr(s string) string {
@@ -34,534 +34,729 @@ func jsStr(s string) string {
 	return b.String()
 }
 
-func kvInit(items map[string]string) string {
+func kvInit(prefix string, items map[string]string) string {
 	pairs := make([]string, 0, len(items))
-	for k, v := range items {
-		pairs = append(pairs, `{"key":"`+jsStr(k)+`","value":"`+jsStr(v)+`"}`)
+	for _, k := range sortedKeys(items) {
+		pairs = append(pairs, `{"k":"`+jsStr(k)+`","v":"`+jsStr(items[k])+`"}`)
 	}
-	return "kvList({items: [" + strings.Join(pairs, ",") + "]})"
+	return `kvList("` + prefix + `", [` + strings.Join(pairs, ",") + `])`
 }
 
-func sidebarInit(rules []rule.Rule) string {
-	type jRule struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Method string `json:"method"`
-		Path   string `json:"path"`
-		Status int    `json:"status"`
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
 	}
-	out := make([]jRule, len(rules))
-	for i, r := range rules {
-		out[i] = jRule{r.ID, r.Name, r.Request.Method, r.Request.Path, r.Response.Status}
-	}
-	b, _ := json.Marshal(out)
-	return "sidebarReorder({rules: " + string(b) + "})"
+	sort.Strings(keys)
+	return keys
 }
 
-func bodyInit(body *rule.BodyMatch) string {
-	if body != nil {
-		return `{enabled: true, mode: "` + jsStr(body.Mode) + `"}`
+func statusVal(status int) string {
+	if status == 0 {
+		status = 200
 	}
-	return `{enabled: false, mode: "exact"}`
+	return strconv.Itoa(status)
 }
 
-func bodyTypeInit(resp *rule.Response) string {
-	if resp.BodyFile != "" {
-		return `{bodyType: "file"}`
-	}
-	return `{bodyType: "inline"}`
+func statusClass(status int) string {
+	return "status status-" + strconv.Itoa(status/100) + "xx"
 }
 
-func bodyVal(body *rule.BodyMatch) string {
-	if body != nil {
-		return body.Value
+func methodClass(m string) string {
+	return "method method-" + strings.ToUpper(strings.TrimSpace(m))
+}
+
+// dimLabel renders a machine dim key ("header:Authorization") for humans.
+func dimLabel(dim string) string {
+	if k, ok := strings.CutPrefix(dim, "header:"); ok {
+		return "header " + k
+	}
+	if k, ok := strings.CutPrefix(dim, "query:"); ok {
+		return "query " + k
+	}
+	return dim
+}
+
+func gotDisplay(got string) string {
+	if got == "" {
+		return "(absent)"
+	}
+	return got
+}
+
+// firstFail returns the dim of the first failing verdict, for jump-to-rule
+// highlighting.
+func firstFail(rv rule.RuleVerdict) string {
+	for _, v := range rv.Verdicts {
+		if !v.OK {
+			return v.Dim
+		}
 	}
 	return ""
 }
 
+// hlSection maps a verdict dim to the editor section it highlights.
+func hlSection(highlight string) string {
+	switch {
+	case highlight == "":
+		return ""
+	case strings.HasPrefix(highlight, "header:"):
+		return "headers"
+	case strings.HasPrefix(highlight, "query:"):
+		return "query"
+	default:
+		return highlight // method, path, body
+	}
+}
+
+func bodyModeVal(b *rule.BodyMatch) string {
+	if b == nil {
+		return "none"
+	}
+	if b.Mode == "" {
+		return "exact"
+	}
+	return b.Mode
+}
+
+func bodyMatchVal(b *rule.BodyMatch) string {
+	if b == nil {
+		return ""
+	}
+	return b.Value
+}
+
+func editorURL(rv rule.RuleVerdict) string {
+	u := "/_ui/partials/rule-editor/" + rv.RuleID
+	if f := firstFail(rv); f != "" {
+		u += "?highlight=" + f
+	}
+	return u
+}
+
 // ---------------------------------------------------------------
-// TEMPL COMPONENTS
+// Shell
 // ---------------------------------------------------------------
 
-templ Shell(rules []rule.Rule, unsaved bool) {
+templ Shell(rules []rule.Rule, unsaved bool, entries []server.JournalEntry) {
 	<!DOCTYPE html>
 	<html lang="en">
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>Mock Server</title>
+			<title>mock/server</title>
 			<link rel="stylesheet" href="/_ui/static/app.css"/>
 			<script src="/_ui/static/htmx.min.js"></script>
+			<script src="/_ui/static/app.js" defer="defer"></script>
 			<script src="/_ui/static/alpine.min.js" defer="defer"></script>
 		</head>
 		<body>
-			<div class="layout" x-data="{ activeRule: '' }">
-				@Sidebar(rules, unsaved)
-				<main id="detail-pane" class="detail-pane">
-					<div class="empty-state">
-						<div class="empty-state-icon">&#9881;</div>
-						<p>No rule selected</p>
-						<span class="hint">Click a rule in the sidebar or press <kbd>Ctrl+N</kbd> to create one</span>
-					</div>
-				</main>
-				<div class="journal" id="journal-panel"
-					hx-get="/_ui/partials/journal"
-					hx-trigger="every 3s"
-					hx-swap="outerHTML">
-				</div>
+			<div class="workspace" id="workspace">
+				@Rail(rules, unsaved)
+				<section class="journal-pane" id="journal-pane">
+					@JournalPanel(entries)
+				</section>
+				<section class="editor-pane" id="editor-pane"></section>
 			</div>
-			<div class="toast-container" id="toasts"></div>
-			<script>
-			function sidebarReorder(config) {
-				return {
-					rules: config.rules,
-					dragIdx: -1,
-					onDragStart(idx, e) { this.dragIdx = idx; e.target.classList.add('dragging'); },
-					onDragOver(e, idx) { e.preventDefault(); e.target.closest('.rule-card')?.classList.add('drag-over'); },
-					onDragLeave(e) { e.target.closest('.rule-card')?.classList.remove('drag-over'); },
-					onDrop(idx) {
-						document.querySelectorAll('.rule-card').forEach(c => c.classList.remove('drag-over', 'dragging'));
-						if (this.dragIdx < 0 || this.dragIdx === idx) return;
-						const arr = this.rules;
-						const [moved] = arr.splice(this.dragIdx, 1);
-						arr.splice(idx, 0, moved);
-						this.rules = [...arr];
-						this.dragIdx = -1;
-						this.persist();
-					},
-					onDragEnd() { document.querySelectorAll('.rule-card').forEach(c => c.classList.remove('dragging', 'drag-over')); this.dragIdx = -1; },
-					persist() {
-						const ids = this.rules.map(r => r.id);
-						fetch('/_ui/api/rules/reorder', {
-							method: 'PUT',
-							headers: {'Content-Type': 'application/json'},
-							body: JSON.stringify(ids)
-						}).then(() => {
-							htmx.ajax('GET', '/_ui/partials/sidebar', 'aside');
-						});
-					}
-				};
-			}
-			function showToast(msg, type) {
-				var t = document.createElement('div');
-				t.className = 'toast toast-' + (type || 'success');
-				t.textContent = msg;
-				document.getElementById('toasts').appendChild(t);
-				setTimeout(function() { t.remove(); }, 2500);
-			}
-			document.addEventListener('keydown', function(e) {
-				if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); htmx.ajax('GET', '/_ui/partials/new-rule', '#detail-pane'); }
-				if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); htmx.ajax('POST', '/_ui/api/save', {target:'#toasts', swap:'beforeend'}); }
-			});
-			</script>
+			@Palette()
+			<div class="toasts" id="toasts"></div>
 		</body>
 	</html>
 }
 
-templ Sidebar(rules []rule.Rule, unsaved bool) {
-	<aside class="sidebar">
-		<div class="sidebar-header">
-			<input type="text" class="sidebar-search" placeholder="Filter rules..."
-				x-on:input="
-					const q = $el.value.toLowerCase();
-					document.querySelectorAll('.rule-card').forEach(c => {
-						const text = c.textContent.toLowerCase();
-						c.style.display = text.includes(q) ? '' : 'none';
-					});
-				"/>
-			<span class="sidebar-count">{ strconv.Itoa(len(rules)) }</span>
-			<div class="sidebar-actions">
-				<button class="btn btn-primary btn-sm"
-					hx-get="/_ui/partials/new-rule"
-					hx-target="#detail-pane">+</button>
-				<button class="btn btn-secondary btn-sm"
-					hx-post="/_ui/api/save"
-					hx-swap="none"
-					hx-on--after-request="htmx.ajax('GET', '/_ui/partials/sidebar', 'aside')">
-					if unsaved {
-						<span class="unsaved-badge"></span>
-					}
-					Save
-				</button>
-			</div>
+// ---------------------------------------------------------------
+// Rail (rule list)
+// ---------------------------------------------------------------
+
+templ Rail(rules []rule.Rule, unsaved bool) {
+	<aside
+		class="rail"
+		id="rail"
+		hx-get="/_ui/partials/rail"
+		hx-trigger="rail-refresh from:body"
+		hx-swap="outerHTML"
+	>
+		<div class="rail-head">
+			<span class="brand">mock<span class="brand-slash">/</span>server</span>
+			<button
+				class="btn btn-save"
+				id="save-btn"
+				hx-post="/_ui/api/save"
+				hx-swap="none"
+				title="Write working copy to YAML (Ctrl+S)"
+			>
+				save
+				if unsaved {
+					<span class="unsaved-dot" title="unsaved changes"></span>
+				}
+			</button>
 		</div>
-		<div class="rule-list" x-data={ sidebarInit(rules) }
-			x-on:dragover.prevent=""
-			x-on:drop="onDrop(parseInt($event.target.closest('.rule-card')?.dataset?.index))">
-			for i, rl := range rules {
-				<div class="rule-card" draggable="true"
-					x-bind:data-index={ strconv.Itoa(i) }
-					x-on:dragstart={ DragStart(i) }
-					x-on:dragover={ DragOver(i) }
-					x-on:dragleave="onDragLeave($event)"
-					x-on:dragend="onDragEnd()"
-					hx-get={ "/_ui/partials/rule-editor/" + rl.ID }
-					hx-target="#detail-pane"
-					hx-on--after-request="document.querySelectorAll('.rule-card.active').forEach(c => c.classList.remove('active')); event.target.classList.add('active');">
-					<span class={ "method method-" + rl.Request.Method }>
-						if rl.Request.Method != "" {
-							{ rl.Request.Method }
-						} else {
-							ALL
-						}
-					</span>
-					<div class="info">
-						<div class="path">{ rl.Request.Path }</div>
-						<div class="name">{ rl.Name }</div>
-					</div>
-					<span class="status">{ strconv.Itoa(rl.Response.Status) }</span>
-				</div>
+		<button
+			class="btn btn-new"
+			hx-get="/_ui/partials/new-rule"
+			hx-target="#editor-pane"
+			hx-swap="innerHTML"
+		>+ new rule <kbd>^N</kbd></button>
+		<div class="rail-list" id="rail-list">
+			if len(rules) == 0 {
+				<div class="rail-empty">no rules yet<br/>press <kbd>^N</kbd> to create one</div>
 			}
+			for _, r := range rules {
+				@RailItem(r)
+			}
+		</div>
+		<div class="rail-foot">
+			<span class="rail-count">{ strconv.Itoa(len(rules)) } rules</span>
+			<button
+				class="btn btn-ghost"
+				hx-get="/_ui/partials/settings"
+				hx-target="#editor-pane"
+				hx-swap="innerHTML"
+			>settings</button>
+			<span class="rail-hint"><kbd>⌘K</kbd> palette</span>
 		</div>
 	</aside>
 }
 
-templ MethodBadge(method string) {
-	<span class={ "method method-" + method }>{ method }</span>
+templ RailItem(r rule.Rule) {
+	<div
+		class="rail-item"
+		draggable="true"
+		data-id={ r.ID }
+		data-name={ r.Name }
+		data-method={ r.Request.Method }
+		data-path={ r.Request.Path }
+		hx-get={ "/_ui/partials/rule-editor/" + r.ID }
+		hx-target="#editor-pane"
+		hx-swap="innerHTML"
+	>
+		<span class={ methodClass(r.Request.Method) }>{ strings.ToUpper(r.Request.Method) }</span>
+		<span class="rail-item-text">
+			<span class="rail-item-name">
+				if r.Name != "" {
+					{ r.Name }
+				} else {
+					(unnamed)
+				}
+			</span>
+			<span class="rail-item-path">{ r.Request.Path }</span>
+		</span>
+	</div>
 }
 
-templ StatusBadge(status int) {
-	<span class="status">{ strconv.Itoa(status) }</span>
+// ---------------------------------------------------------------
+// Journal
+// ---------------------------------------------------------------
+
+templ JournalPanel(entries []server.JournalEntry) {
+	<div class="journal" id="journal">
+		<div class="jtoolbar">
+			<span class="live-dot" id="live-dot" title="live stream"></span>
+			<input
+				class="jfilter"
+				id="jfilter"
+				type="search"
+				placeholder="filter traffic — space-separated terms match method, path, status  ( / )"
+				autocomplete="off"
+			/>
+			<button class="btn btn-ghost" id="jpause" title="freeze the stream">pause</button>
+			<button class="btn btn-ghost" id="jclear" title="wipe the journal">clear</button>
+			<span class="jcount" id="jcount">{ strconv.Itoa(len(entries)) }</span>
+		</div>
+		<div class="stream" id="stream">
+			for i := len(entries) - 1; i >= 0; i-- {
+				@JournalRow(entries[i])
+			}
+			<div class="journal-empty">
+				<div class="journal-empty-mark">~</div>
+				<p>no traffic yet</p>
+				<p class="dim">point your client at this server — requests appear here live</p>
+			</div>
+		</div>
+	</div>
 }
 
-templ RuleEditor(rl rule.Rule) {
-	<div class="editor" x-data="{ tab: 'request' }">
-		<div class="editor-header">
-			<h2 class="editor-title">
-				if rl.Name != "" {
+templ JournalRow(e server.JournalEntry) {
+	<details
+		class="jrow"
+		data-seq={ strconv.FormatInt(e.Seq, 10) }
+		data-hay={ strings.ToLower(e.Method + " " + e.Path + " " + strconv.Itoa(e.Status) + " " + e.Matched) }
+	>
+		<summary class="jsum">
+			<span class="jtime">{ e.Timestamp.Format("15:04:05") }</span>
+			<span class={ methodClass(e.Method) }>{ e.Method }</span>
+			<span class="jpath">
+				{ e.Path }
+				if e.Query != "" {
+					<span class="jquery">?{ e.Query }</span>
+				}
+			</span>
+			<span class={ statusClass(e.Status) }>{ strconv.Itoa(e.Status) }</span>
+			if e.Matched != "" {
+				<span class="jmatch">→ { e.Matched }</span>
+			} else {
+				<span class="jmatch jmiss">
+					✖ no match
+					if n := len(rule.NearMisses(e.Explanations, 3)); n > 0 {
+						<span class="jnear">{ strconv.Itoa(n) } near</span>
+					}
+				</span>
+			}
+		</summary>
+		<div class="jdetail">
+			<div class="jdetail-req">
+				<div class="jdetail-title">request</div>
+				if len(e.Headers) > 0 {
+					<div class="kv-table">
+						for _, k := range sortedKeys(e.Headers) {
+							<div class="kv-line"><span class="kv-k">{ k }</span><span class="kv-v">{ e.Headers[k] }</span></div>
+						}
+					</div>
+				}
+				if e.Body != "" {
+					@templ.Raw(highlightBody(e.Body))
+				} else {
+					<div class="dim">(empty body)</div>
+				}
+			</div>
+			<div class="jdetail-why">
+				@Explanation(e)
+			</div>
+		</div>
+	</details>
+}
+
+templ Explanation(e server.JournalEntry) {
+	if e.Matched != "" {
+		<div class="jdetail-title">matched</div>
+		<div class="vblock">
+			<a
+				class="vrule"
+				href="#"
+				hx-get={ "/_ui/partials/rule-editor/" + e.MatchedID }
+				hx-target="#editor-pane"
+				hx-swap="innerHTML"
+			>{ e.Matched }</a>
+			<span class="vok">✓ all criteria matched</span>
+		</div>
+		if len(e.Explanations) > 0 {
+			<details class="vskipped">
+				<summary>{ strconv.Itoa(len(e.Explanations)) } earlier rules skipped — shadowing check</summary>
+				for _, rv := range e.Explanations {
+					@VerdictBlock(rv)
+				}
+			</details>
+		}
+	} else {
+		<div class="jdetail-title">why no match</div>
+		if near := rule.NearMisses(e.Explanations, 3); len(near) > 0 {
+			for _, rv := range near {
+				@VerdictBlock(rv)
+			}
+		} else {
+			<div class="dim">no rule came close — nothing shares this method or path</div>
+		}
+		<button
+			class="btn btn-accent"
+			hx-get={ "/_ui/partials/new-rule?from=" + strconv.FormatInt(e.Seq, 10) }
+			hx-target="#editor-pane"
+			hx-swap="innerHTML"
+		>+ create rule from this request</button>
+	}
+}
+
+templ VerdictBlock(rv rule.RuleVerdict) {
+	<div class="vblock">
+		<a
+			class="vrule"
+			href="#"
+			hx-get={ editorURL(rv) }
+			hx-target="#editor-pane"
+			hx-swap="innerHTML"
+			title="open rule, highlight the failing criterion (E)"
+		>
+			if rv.RuleName != "" {
+				{ rv.RuleName }
+			} else {
+				(unnamed)
+			}
+		</a>
+		for _, v := range rv.Verdicts {
+			if v.OK {
+				<div class="vline vok">✓ { dimLabel(v.Dim) } <span class="vwant">{ v.Want }</span></div>
+			} else {
+				<div class="vline vfail">
+					✖ { dimLabel(v.Dim) }
+					<span class="vdiff">expected <b>{ v.Want }</b> · got <b>{ gotDisplay(v.Got) }</b></span>
+				</div>
+			}
+		}
+	</div>
+}
+
+// ---------------------------------------------------------------
+// Rule editor
+// ---------------------------------------------------------------
+
+templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
+	<div class="editor" id="editor">
+		<div class="editor-head">
+			<span class="editor-title">
+				if isNew {
+					new rule
+				} else if rl.Name != "" {
 					{ rl.Name }
 				} else {
-					New Rule
+					(unnamed)
 				}
-			</h2>
+			</span>
+			<button class="btn btn-ghost editor-close" id="editor-close" title="close (Esc)">✕</button>
+		</div>
+		if errMsg != "" {
+			<div class="banner-error">{ errMsg }</div>
+		}
+		<form
+			class="editor-form"
+			x-data={ "{tpl: " + strconv.FormatBool(rl.Response.Template) + "}" }
+			if isNew {
+				hx-post="/_ui/api/rules"
+			} else {
+				hx-put={ "/_ui/api/rules/" + rl.ID }
+			}
+			hx-target="#editor"
+			hx-swap="outerHTML"
+		>
+			<div class="form-section">
+				<label class="field">
+					<span class="field-label">name</span>
+					<input type="text" name="name" value={ rl.Name } placeholder="e.g. get users" autocomplete="off"/>
+				</label>
+			</div>
+			<div class={ "form-section", templ.KV("flash", hlSection(highlight) == "method" || hlSection(highlight) == "path") }>
+				<div class="form-section-title">request match</div>
+				<div class="form-row">
+					<label class="field field-method">
+						<span class="field-label">method</span>
+						<select name="method">
+							for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
+								<option value={ m } selected?={ strings.EqualFold(rl.Request.Method, m) }>{ m }</option>
+							}
+						</select>
+					</label>
+					<label class="field field-grow">
+						<span class="field-label">path</span>
+						<input
+							type="text"
+							name="path"
+							value={ rl.Request.Path }
+							placeholder="/api/users"
+							autocomplete="off"
+							hx-post="/_ui/api/validate"
+							hx-vals='{"field":"path"}'
+							hx-include="closest .form-row"
+							hx-trigger="blur changed"
+							hx-target="next .err"
+						/>
+						<span class="err"></span>
+					</label>
+					<label class="field">
+						<span class="field-label">mode</span>
+						<select name="path_mode">
+							for _, m := range []string{"exact", "prefix", "regex"} {
+								<option value={ m } selected?={ rl.Request.PathMode == m || (rl.Request.PathMode == "" && m == "exact") }>{ m }</option>
+							}
+						</select>
+					</label>
+				</div>
+			</div>
+			<div class={ "form-section", templ.KV("flash", hlSection(highlight) == "headers") }>
+				<div class="form-section-title">match headers</div>
+				@KvEditor("reqh", rl.Request.Headers)
+			</div>
+			<div class={ "form-section", templ.KV("flash", hlSection(highlight) == "query") }>
+				<div class="form-section-title">match query params</div>
+				@KvEditor("reqq", rl.Request.Query)
+			</div>
+			<div class={ "form-section", templ.KV("flash", hlSection(highlight) == "body") } x-data={ "{mode: '" + bodyModeVal(rl.Request.Body) + "'}" }>
+				<div class="form-section-title">match body</div>
+				<div class="form-row">
+					<label class="field">
+						<span class="field-label">mode</span>
+						<select name="body_mode" x-model="mode">
+							<option value="none">none</option>
+							<option value="exact">exact</option>
+							<option value="contains">contains</option>
+						</select>
+					</label>
+					<label class="field field-grow" x-show="mode !== 'none'">
+						<span class="field-label">value</span>
+						<textarea name="body_match" rows="2">{ bodyMatchVal(rl.Request.Body) }</textarea>
+					</label>
+				</div>
+			</div>
+			<div class="form-section form-section-resp">
+				<div class="form-section-title">response</div>
+				<div class="form-row">
+					<label class="field">
+						<span class="field-label">status</span>
+						<input
+							type="text"
+							name="status"
+							value={ statusVal(rl.Response.Status) }
+							size="4"
+							autocomplete="off"
+							hx-post="/_ui/api/validate"
+							hx-vals='{"field":"status"}'
+							hx-trigger="blur changed"
+							hx-target="next .err"
+						/>
+						<span class="err"></span>
+					</label>
+					<label class="field">
+						<span class="field-label">delay</span>
+						<input
+							type="text"
+							name="delay"
+							value={ rl.Response.Delay }
+							placeholder="500ms"
+							size="8"
+							autocomplete="off"
+							hx-post="/_ui/api/validate"
+							hx-vals='{"field":"delay"}'
+							hx-trigger="blur changed"
+							hx-target="next .err"
+						/>
+						<span class="err"></span>
+					</label>
+					<label class="field field-check">
+						<input type="checkbox" name="template" value="1" x-model="tpl" checked?={ rl.Response.Template }/>
+						<span>template</span>
+					</label>
+				</div>
+				<div class="form-section-title sub">response headers</div>
+				@KvEditor("resph", rl.Response.Headers)
+				<label class="field">
+					<span class="field-label">
+						body
+						if rl.Response.BodyFile != "" {
+							<span class="dim">(file: { rl.Response.BodyFile })</span>
+						}
+					</span>
+					<textarea name="body" rows="7" placeholder={ "{\"ok\": true}" }>{ rl.Response.Body }</textarea>
+				</label>
+				<input type="hidden" name="body_file" value={ rl.Response.BodyFile }/>
+				<div class="tpl-hint" x-show="tpl" x-cloak>
+					{ "{{.Method}} {{.Path}} {{.Body}} {{.Header \"X\"}} {{.Query \"k\"}} · now · nowFormat · randomInt · randomString · counter · requestCount" }
+				</div>
+			</div>
 			<div class="editor-actions">
-				<button class="btn btn-secondary btn-sm" title="Duplicate"
-					hx-post="/_ui/api/rules"
-					hx-include="closest form"
-					hx-target="#detail-pane"
-					hx-swap="outerHTML"
-					hx-on--after-request="htmx.ajax('GET', '/_ui/partials/sidebar', 'aside')">Duplicate</button>
-				<button class="btn btn-danger btn-sm"
-					hx-delete={ "/_ui/api/rules/" + rl.ID }
-					hx-confirm="Delete this rule?"
-					hx-target="#detail-pane"
-					hx-swap="innerHTML"
-					hx-on--after-request="htmx.ajax('GET', '/_ui/partials/sidebar', 'aside'); htmx.ajax('GET', '/_ui/partials/new-rule', '#detail-pane')">Delete</button>
-				<button class="btn btn-primary"
-					hx-put={ "/_ui/api/rules/" + rl.ID }
-					hx-include="closest form"
-					hx-swap="none"
-					hx-on--after-request="htmx.ajax('GET', '/_ui/partials/sidebar', 'aside'); showToast('Rule saved', 'success')">Save Rule</button>
+				<button type="submit" class="btn btn-accent">
+					if isNew {
+						create rule
+					} else {
+						apply changes
+					}
+				</button>
+				if !isNew {
+					<button
+						type="button"
+						class="btn"
+						hx-post="/_ui/api/rules"
+						hx-include="closest form"
+						hx-target="#editor"
+						hx-swap="outerHTML"
+						title="create a copy of this rule from the current form values"
+					>duplicate</button>
+					<button
+						type="button"
+						class="btn btn-danger"
+						hx-delete={ "/_ui/api/rules/" + rl.ID }
+						hx-target="#editor-pane"
+						hx-swap="innerHTML"
+						hx-confirm="Delete this rule?"
+					>delete</button>
+				}
+				<span class="editor-note">changes land in the working copy — <b>save</b> writes to disk</span>
 			</div>
-		</div>
-
-		<div class="tabs">
-			<button class="tab" :class="tab === 'request' ? 'active' : ''" x-on:click="tab = 'request'">Request</button>
-			<button class="tab" :class="tab === 'response' ? 'active' : ''" x-on:click="tab = 'response'">Response</button>
-			<button class="tab" :class="tab === 'test' ? 'active' : ''" x-on:click="tab = 'test'">Test</button>
-		</div>
-
-		<form id={ "rule-form-" + rl.ID }>
-			<input type="hidden" name="id" value={ rl.ID }/>
-
-			<div x-show="tab === 'request'">
-				@RequestForm(rl)
-			</div>
-			<div x-show="tab === 'response'">
-				@ResponseForm(rl)
-			</div>
-			<div x-show="tab === 'test'">
-				@TestPanel(rl)
+			<div class="form-section test-panel">
+				<div class="form-section-title">test request</div>
+				<div class="form-row">
+					<label class="field">
+						<span class="field-label">method</span>
+						<select name="probe_method">
+							for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
+								<option value={ m } selected?={ strings.EqualFold(rl.Request.Method, m) }>{ m }</option>
+							}
+						</select>
+					</label>
+					<label class="field field-grow">
+						<span class="field-label">path</span>
+						<input type="text" name="probe_path" value={ rl.Request.Path } autocomplete="off"/>
+					</label>
+				</div>
+				<div class="form-row">
+					<label class="field field-grow">
+						<span class="field-label">headers <span class="dim">(Key: Value, one per line)</span></span>
+						<textarea name="probe_headers" rows="2" placeholder="Content-Type: application/json"></textarea>
+					</label>
+					<label class="field field-grow">
+						<span class="field-label">body</span>
+						<textarea name="probe_body" rows="2"></textarea>
+					</label>
+				</div>
+				<div class="form-row test-buttons">
+					<button
+						type="button"
+						class="btn"
+						hx-post="/_ui/api/test-dry"
+						hx-include="closest form"
+						hx-target="next .test-result-slot"
+						title="evaluate this form's criteria against the test request — nothing is sent"
+					>dry run</button>
+					<button
+						type="button"
+						class="btn"
+						hx-post="/_ui/api/test-probe"
+						hx-include="closest .test-panel"
+						hx-target="next .test-result-slot"
+						title="send a real request to the running server (saved rules)"
+					>probe</button>
+					<button
+						type="button"
+						class="btn"
+						x-show="tpl"
+						x-cloak
+						hx-post="/_ui/api/template-preview"
+						hx-include="closest form"
+						hx-target="next .test-result-slot"
+						title="render the response body template against the test request"
+					>preview template</button>
+				</div>
+				<div class="test-result-slot"></div>
 			</div>
 		</form>
 	</div>
 }
 
-templ RequestForm(rl rule.Rule) {
-	<div class="form-section">
-		<div class="form-section-title">General</div>
-		<div class="form-group">
-			<label>Name</label>
-			<input type="text" name="name" value={ rl.Name } placeholder="e.g. Get Users"/>
-		</div>
-		<div class="form-row">
-			<div class="form-group">
-				<label>Method</label>
-				<select name="method">
-					for _, m := range []string{"", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
-						if m == rl.Request.Method {
-							<option value={ m } selected="selected">{ m }</option>
-						} else {
-							<option value={ m }>{ m }</option>
-						}
-					}
-				</select>
+templ KvEditor(prefix string, items map[string]string) {
+	<div class="kv" x-data={ kvInit(prefix, items) }>
+		<template x-for="(item, idx) in items" :key="idx">
+			<div class="kv-row">
+				<input type="text" :name="prefix + '_k'" x-model="item.k" placeholder="key" autocomplete="off"/>
+				<input type="text" :name="prefix + '_v'" x-model="item.v" placeholder="value" autocomplete="off"/>
+				<button type="button" class="btn btn-ghost kv-del" x-on:click="items.splice(idx, 1)">✕</button>
 			</div>
-			<div class="form-group">
-				<label>Path</label>
-				<input type="text" name="path" value={ rl.Request.Path } placeholder="/api/users" class="mono"/>
-			</div>
-			<div class="form-group">
-				<label>Path Mode</label>
-				<select name="path_mode">
-					for _, pm := range []string{"exact", "prefix", "regex"} {
-						if pm == rl.Request.PathMode {
-							<option value={ pm } selected="selected">{ pm }</option>
-						} else {
-							<option value={ pm }>{ pm }</option>
-						}
-					}
-				</select>
-			</div>
-		</div>
-	</div>
-
-	@KvSection("Request Headers", "req_hdr", rl.Request.Headers)
-	@KvSection("Query Parameters", "req_query", rl.Request.Query)
-	@BodyMatchSection(rl.Request.Body)
-}
-
-templ BodyMatchSection(body *rule.BodyMatch) {
-	<div class="form-section" x-data={ bodyInit(body) }>
-		<div class="form-section-title">Body Match</div>
-		<label class="checkbox-label">
-			<input type="checkbox" name="body_enabled" x-model="enabled"/>
-			Enable body matching
-		</label>
-		<div x-show="enabled" style="margin-top: 12px">
-			<div class="form-row form-row-2">
-				<div class="form-group">
-					<label>Mode</label>
-					<select name="body_mode" x-model="mode">
-						<option value="exact">exact</option>
-						<option value="contains">contains</option>
-					</select>
-				</div>
-			</div>
-			<div class="form-group">
-				<label>Value</label>
-				<textarea name="body_value" rows="3" class="mono">{ bodyVal(body) }</textarea>
-			</div>
-		</div>
+		</template>
+		<button type="button" class="btn btn-ghost kv-add" x-on:click="items.push({k: '', v: ''})">+ add</button>
 	</div>
 }
 
-templ TestPanel(rl rule.Rule) {
-	<div class="test-panel" x-data={ TestInit(rl.Request.Path) }>
-		<div class="test-panel-header">Test Request</div>
-		<div class="test-panel-body">
-			<div class="form-row form-row-4">
-				<div class="form-group">
-					<label>Method</label>
-					<select x-model="method" name="probe_method">
-						for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
-							<option value={ m }>{ m }</option>
-						}
-					</select>
-				</div>
-				<div class="form-group" style="grid-column: span 2">
-					<label>Path</label>
-					<input type="text" x-model="path" name="probe_path" class="mono"/>
-				</div>
-				<div class="form-group" style="display:flex; align-items:flex-end; gap:4px">
-					<button type="button" class="btn btn-secondary btn-sm"
-						hx-post={ "/_ui/api/rules/" + rl.ID + "/test-dry" }
-						hx-include="closest .test-panel-body"
-						hx-target="next .test-result"
-						hx-swap="outerHTML">Dry Run</button>
-					<button type="button" class="btn btn-primary btn-sm"
-						hx-post={ "/_ui/api/rules/" + rl.ID + "/test-probe" }
-						hx-include="closest .test-panel-body"
-						hx-target="next .test-result"
-						hx-swap="outerHTML">Probe</button>
-				</div>
-			</div>
-			<div class="form-group">
-				<label>Headers <span style="font-weight:400; color: var(--text-muted)">(JSON)</span></label>
-				<input type="text" x-model="headers" name="probe_headers" placeholder='{"Content-Type":"application/json"}' class="mono"/>
-			</div>
-			<div class="form-group">
-				<label>Body</label>
-				<textarea x-model="body" name="probe_body" rows="3" class="mono"></textarea>
-			</div>
-			<div class="test-result"></div>
-		</div>
+// ---------------------------------------------------------------
+// Test results
+// ---------------------------------------------------------------
+
+templ DryRunResult(rv rule.RuleVerdict) {
+	<div class="test-result">
+		if rv.Matched {
+			<div class="test-verdict ok">✓ MATCH — this rule matches the test request</div>
+		} else {
+			<div class="test-verdict fail">✖ NO MATCH</div>
+		}
+		@VerdictLines(rv)
 	</div>
 }
 
-templ JournalPanel(entries []server.JournalEntry) {
-	if len(entries) == 0 {
-		<div class="journal">
-			<div class="journal-header"><span class="journal-title">Request Journal</span></div>
-			<p style="padding:24px; text-align:center; color:var(--text-muted); font-size:12px">No requests recorded yet</p>
-		</div>
-	} else {
-		<div class="journal"
-			hx-get="/_ui/partials/journal"
-			hx-trigger="every 3s"
-			hx-swap="outerHTML">
-			<div class="journal-header">
-				<span class="journal-title">Request Journal</span>
-				<span style="font-size:11px;color:var(--text-muted)">{ strconv.Itoa(len(entries)) } requests</span>
+templ VerdictLines(rv rule.RuleVerdict) {
+	for _, v := range rv.Verdicts {
+		if v.OK {
+			<div class="vline vok">✓ { dimLabel(v.Dim) } <span class="vwant">{ v.Want }</span></div>
+		} else {
+			<div class="vline vfail">
+				✖ { dimLabel(v.Dim) }
+				<span class="vdiff">expected <b>{ v.Want }</b> · got <b>{ gotDisplay(v.Got) }</b></span>
 			</div>
-			<table class="journal-table">
-				<thead>
-					<tr>
-						<th>Method</th>
-						<th>Path</th>
-						<th>Status</th>
-						<th>Matched</th>
-						<th>Time</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, e := range entries {
-						<tr>
-							<td><span class={ "method method-" + e.Method } style="font-size:9px; padding:1px 4px">{ e.Method }</span></td>
-							<td>{ e.Path }</td>
-							<td><span class="status" style="font-size:10px">{ strconv.Itoa(e.Status) }</span></td>
-							<td>
-								if e.Matched != "" {
-									{ e.Matched }
-								} else {
-									<span style="color:var(--text-placeholder)">—</span>
-								}
-							</td>
-							<td>{ e.Timestamp.Format("15:04:05") }</td>
-						</tr>
-					}
-				</tbody>
-			</table>
-		</div>
-	}
-}
-
-templ ResponseForm(rl rule.Rule) {
-	<div class="form-section">
-		<div class="form-section-title">Response</div>
-		<div class="form-row form-row-2">
-			<div class="form-group">
-				<label>Status Code</label>
-				<input type="number" name="status" value={ FormatStatus(rl.Response.Status) } min="100" max="599"/>
-			</div>
-			<div class="form-group">
-				<label>Delay</label>
-				<input type="text" name="delay" value={ rl.Response.Delay } placeholder="e.g. 500ms, 2s" class="mono"/>
-			</div>
-		</div>
-	</div>
-
-	@KvSection("Response Headers", "resp_hdr", rl.Response.Headers)
-
-	<div class="form-section">
-		<div class="form-section-title">Body</div>
-		<div x-data={ bodyTypeInit(&rl.Response) }>
-			<div class="toggle" style="margin-bottom: 12px">
-				<button type="button" :class="bodyType === 'inline' ? 'active' : ''" x-on:click="bodyType = 'inline'">Inline</button>
-				<button type="button" :class="bodyType === 'file' ? 'active' : ''" x-on:click="bodyType = 'file'">File</button>
-			</div>
-
-			<div x-show="bodyType === 'inline'">
-				<div class="form-group">
-					<textarea name="body" rows="8" class="mono">{ rl.Response.Body }</textarea>
-				</div>
-			</div>
-
-			<div x-show="bodyType === 'file'">
-				if rl.Response.BodyFile != "" {
-					<div class="mono" style="font-size:12px; color: var(--text-muted);">{ rl.Response.BodyFile }</div>
-				}
-				<input type="hidden" name="body_file" value={ rl.Response.BodyFile }/>
-			</div>
-
-			<label class="checkbox-label" style="margin-top: 12px">
-				<input type="checkbox" name="template"
-					if rl.Response.Template { checked="checked" }/>
-				Template (use <code>{`{{.Method}}`}</code>, <code>{`{{.Path}}`}</code>, etc.)
-			</label>
-		</div>
-	</div>
-}
-
-templ KvSection(title string, prefix string, items map[string]string) {
-	<div class="form-section">
-		<div class="form-section-title">{ title }</div>
-		<div class="kv-editor" x-data={ kvInit(items) }>
-			<div class="kv-rows">
-				<template x-for="(item, idx) in entries" :key="idx">
-					<div class="kv-row">
-						<input type="text" :name={ `"` + prefix + `_key_\" + idx` } x-model="item.key" placeholder="Key"/>
-						<input type="text" :name={ `"` + prefix + `_val_\" + idx` } x-model="item.value" placeholder="Value"/>
-						<button type="button" class="btn btn-ghost btn-xs" x-on:click="entries.splice(idx, 1)">&times;</button>
-					</div>
-				</template>
-			</div>
-			<div style="padding: 4px 8px">
-				<button type="button" class="btn btn-ghost btn-sm" x-on:click="entries.push({key: '', value: ''})">+ Add</button>
-			</div>
-		</div>
-	</div>
-}
-
-templ SettingsPanel(cfg rule.Config) {
-	<div class="max-w-md space-y-4">
-		<h2 class="text-lg font-semibold text-gray-800">Server Settings</h2>
-		<div>
-			<label class="block text-sm font-medium text-gray-700 mb-1">Listen Address</label>
-			<input type="text" name="listen" value={ cfg.Listen }
-				class="border border-gray-300 rounded p-2 w-full text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-				placeholder="127.0.0.1:8080"/>
-		</div>
-		<button
-			class="rounded px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-			hx-put="/_ui/api/config"
-			hx-include="previous input"
-			hx-swap="none">Save</button>
-	</div>
-}
-
-templ TemplatePreview(result string, err string) {
-	if err != "" {
-		<div class="mt-3 p-3 border border-red-200 rounded bg-red-50 text-sm text-red-700">
-			<strong>Error:</strong> { err }
-		</div>
-	} else {
-		<div class="mt-3 p-3 border border-gray-200 rounded bg-gray-50">
-			<pre class="text-sm font-mono text-gray-800 whitespace-pre-wrap">{ result }</pre>
-		</div>
-	}
-}
-
-templ DryRunResult(matched bool) {
-	if matched {
-		<div class="test-result success"><strong>Match</strong> — rule matches the request</div>
-	} else {
-		<div class="test-result fail"><strong>No Match</strong> — rule does not match the request</div>
+		}
 	}
 }
 
 templ ProbeResultView(result ProbeResult) {
 	<div class="test-result">
-		<div>
-			Status:
-			@StatusBadge(result.Status)
+		<div class="test-verdict">
+			response <span class={ statusClass(result.Status) }>{ strconv.Itoa(result.Status) }</span>
 		</div>
 		if len(result.Headers) > 0 {
 			<details>
-				<summary>Headers ({ strconv.Itoa(len(result.Headers)) })</summary>
-				<pre>
-				for k, v := range result.Headers {
-					{ k }:{ " " }{ v }
-					{ "\n" }
-				}
-				</pre>
+				<summary class="dim">headers ({ strconv.Itoa(len(result.Headers)) })</summary>
+				<div class="kv-table">
+					for _, k := range sortedKeys(result.Headers) {
+						<div class="kv-line"><span class="kv-k">{ k }</span><span class="kv-v">{ result.Headers[k] }</span></div>
+					}
+				</div>
 			</details>
 		}
 		if result.Body != "" {
-			<details open>
-				<summary>Body</summary>
-				@templ.Raw(highlightBody(result.Body))
-			</details>
+			@templ.Raw(highlightBody(result.Body))
 		}
+	</div>
+}
+
+templ TemplatePreview(result string) {
+	<div class="test-result">
+		<div class="test-verdict ok">template output</div>
+		<pre class="json-body">{ result }</pre>
+	</div>
+}
+
+templ TestError(msg string) {
+	<div class="test-result">
+		<div class="test-verdict err">{ msg }</div>
+	</div>
+}
+
+templ FieldError(msg string) {
+	<span class="field-error">{ msg }</span>
+}
+
+// ---------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------
+
+templ SettingsPanel(cfg rule.Config) {
+	<div class="editor" id="editor">
+		<div class="editor-head">
+			<span class="editor-title">settings</span>
+			<button class="btn btn-ghost editor-close" id="editor-close" title="close (Esc)">✕</button>
+		</div>
+		<form class="editor-form" hx-put="/_ui/api/config" hx-target="#editor" hx-swap="outerHTML">
+			<div class="form-section">
+				<label class="field">
+					<span class="field-label">listen address</span>
+					<input type="text" name="listen" value={ cfg.Listen } placeholder="127.0.0.1:8080" autocomplete="off"/>
+				</label>
+				<p class="dim">written to the YAML on save; the running server keeps its current address until restarted</p>
+			</div>
+			<div class="editor-actions">
+				<button type="submit" class="btn btn-accent">apply</button>
+			</div>
+		</form>
+	</div>
+}
+
+// ---------------------------------------------------------------
+// Command palette (populated by app.js)
+// ---------------------------------------------------------------
+
+templ Palette() {
+	<div class="palette-overlay" id="palette" hidden>
+		<div class="palette-box">
+			<input
+				class="palette-input"
+				id="palette-input"
+				type="text"
+				placeholder="type a rule name, path, or command…"
+				autocomplete="off"
+			/>
+			<div class="palette-results" id="palette-results"></div>
+		</div>
 	</div>
 }

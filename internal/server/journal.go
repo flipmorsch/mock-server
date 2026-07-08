@@ -12,51 +12,93 @@ import (
 )
 
 type JournalEntry struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Method    string            `json:"method"`
-	Path      string            `json:"path"`
-	Query     string            `json:"query"`
-	Headers   map[string]string `json:"headers"`
-	Body      string            `json:"body"`
-	Matched   string            `json:"matched"`
-	Status    int               `json:"status"`
+	Seq          int64              `json:"seq"`
+	Timestamp    time.Time          `json:"timestamp"`
+	Method       string             `json:"method"`
+	Path         string             `json:"path"`
+	Query        string             `json:"query"`
+	Headers      map[string]string  `json:"headers"`
+	Body         string             `json:"body"`
+	Matched      string             `json:"matched"`
+	MatchedID    string             `json:"matched_id,omitempty"`
+	Status       int                `json:"status"`
+	Explanations []rule.RuleVerdict `json:"explanations,omitempty"`
 }
 
-const maxBodyRecord = 64 * 1024
+const (
+	maxBodyRecord = 64 * 1024
+	maxEntries    = 200
+)
 
 type Journal struct {
 	mu      sync.RWMutex
 	entries []JournalEntry
+	seq     int64
+	subs    map[int]chan JournalEntry
+	nextSub int
 }
 
 func NewJournal() *Journal {
-	return &Journal{}
+	return &Journal{subs: make(map[int]chan JournalEntry)}
 }
 
-func (j *Journal) Record(method, path, query string, headers map[string]string, body []byte, matched string, status int) {
-	bodyStr := string(body)
-	if len(bodyStr) > maxBodyRecord {
-		bodyStr = bodyStr[:maxBodyRecord]
+func (j *Journal) Record(e JournalEntry) {
+	if len(e.Body) > maxBodyRecord {
+		e.Body = e.Body[:maxBodyRecord]
 	}
+	e.Timestamp = time.Now()
 
 	j.mu.Lock()
-	j.entries = append(j.entries, JournalEntry{
-		Timestamp: time.Now(),
-		Method:    method,
-		Path:      path,
-		Query:     query,
-		Headers:   headers,
-		Body:      bodyStr,
-		Matched:   matched,
-		Status:    status,
-	})
+	j.seq++
+	e.Seq = j.seq
+	// ponytail: ring buffer via slice shift; O(n) is nothing at cap 200
+	if len(j.entries) >= maxEntries {
+		copy(j.entries, j.entries[1:])
+		j.entries[len(j.entries)-1] = e
+	} else {
+		j.entries = append(j.entries, e)
+	}
+	for _, ch := range j.subs {
+		select { // non-blocking: a slow SSE client drops entries, never stalls serving
+		case ch <- e:
+		default:
+		}
+	}
 	j.mu.Unlock()
+}
+
+// Subscribe returns a channel receiving new entries and a cancel func.
+// The channel is never closed; after cancel no more sends happen and it is
+// garbage-collected with the subscriber.
+func (j *Journal) Subscribe() (<-chan JournalEntry, func()) {
+	ch := make(chan JournalEntry, 16)
+	j.mu.Lock()
+	id := j.nextSub
+	j.nextSub++
+	j.subs[id] = ch
+	j.mu.Unlock()
+	return ch, func() {
+		j.mu.Lock()
+		delete(j.subs, id)
+		j.mu.Unlock()
+	}
 }
 
 func (j *Journal) Clear() {
 	j.mu.Lock()
 	j.entries = nil
 	j.mu.Unlock()
+}
+
+func (j *Journal) Find(seq int64) (JournalEntry, bool) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	for i := range j.entries {
+		if j.entries[i].Seq == seq {
+			return j.entries[i], true
+		}
+	}
+	return JournalEntry{}, false
 }
 
 func (j *Journal) Entries(filter *rule.RequestFilter) []JournalEntry {

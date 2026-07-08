@@ -93,19 +93,32 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reqHeaders[http.CanonicalHeaderKey(k)] = r.Header.Get(k)
 	}
 
-	matched, ok := h.srv.MatchRule(r, body)
-	if ok {
+	entry := server.JournalEntry{
+		Method:  r.Method,
+		Path:    r.URL.Path,
+		Query:   r.URL.RawQuery,
+		Headers: reqHeaders,
+		Body:    string(body),
+	}
+
+	matched, misses := h.srv.MatchRule(r, body)
+	entry.Explanations = misses
+	if matched != nil {
 		if matched.Response.DelayDuration > 0 {
 			time.Sleep(matched.Response.DelayDuration)
 		}
 		log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, matched.Response.Status, matched.Name)
-		h.srv.Journal().Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, matched.Name, matched.Response.Status)
+		entry.Matched = matched.Name
+		entry.MatchedID = matched.ID
+		entry.Status = matched.Response.Status
+		h.srv.Journal().Record(entry)
 		writeResponse(w, &matched.Response, r, body, h.srv.Journal())
 		return
 	}
 
 	log.Printf("%s %s → 404 (no match)", r.Method, r.URL.Path)
-	h.srv.Journal().Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, "", 404)
+	entry.Status = 404
+	h.srv.Journal().Record(entry)
 	http.NotFound(w, r)
 }
 

@@ -1,31 +1,21 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	"io/fs"
-	"log"
 	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"mock-server/internal/rule"
 	"mock-server/internal/server"
 )
-
-type ProbeRequest struct {
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Headers map[string]string `json:"headers"`
-	Body    string            `json:"body"`
-}
-
-type ProbeResult struct {
-	Status  int               `json:"status"`
-	Headers map[string]string `json:"headers"`
-	Body    string            `json:"body"`
-}
 
 func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 	mux := http.NewServeMux()
@@ -35,136 +25,193 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 
 	mux.HandleFunc("GET /_ui/{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		Shell(srv.WorkingCopy(), srv.HasUnsaved()).Render(r.Context(), w)
+		Shell(srv.WorkingCopy(), srv.HasUnsaved(), srv.Journal().Entries(nil)).Render(r.Context(), w)
 	})
 
+	// ---- live journal stream -------------------------------------------
+
+	mux.HandleFunc("GET /_ui/api/events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		ch, cancel := srv.Journal().Subscribe()
+		defer cancel()
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case e := <-ch:
+				var buf bytes.Buffer
+				JournalRow(e).Render(r.Context(), &buf)
+				for _, line := range strings.Split(buf.String(), "\n") {
+					fmt.Fprintf(w, "data: %s\n", line)
+				}
+				fmt.Fprint(w, "\n")
+				flusher.Flush()
+			}
+		}
+	})
+
+	// ---- rule CRUD (form-encoded in, HTML out) --------------------------
+
 	mux.HandleFunc("POST /_ui/api/rules", func(w http.ResponseWriter, r *http.Request) {
-		var rl rule.Rule
-		if err := json.NewDecoder(r.Body).Decode(&rl); err != nil {
-			writeJSON(w, http.StatusBadRequest, mapError("invalid JSON: "+err.Error()))
+		rl := ruleFromForm(r)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := rule.CheckRule(rl); err != nil {
+			Editor(rl, true, err.Error(), "").Render(r.Context(), w)
 			return
 		}
 		created := srv.CreateRule(rl)
-		writeJSON(w, http.StatusCreated, created)
+		notify(w, "Rule created", true)
+		Editor(created, false, "", "").Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("PUT /_ui/api/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		var updated rule.Rule
-		if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
-			writeJSON(w, http.StatusBadRequest, mapError("invalid JSON: "+err.Error()))
+		rl := ruleFromForm(r)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := rule.CheckRule(rl); err != nil {
+			rl.ID = id
+			Editor(rl, false, err.Error(), "").Render(r.Context(), w)
 			return
 		}
-		result, ok := srv.UpdateRule(id, updated)
+		updated, ok := srv.UpdateRule(id, rl)
 		if !ok {
-			writeJSON(w, http.StatusNotFound, mapError("rule not found"))
+			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, result)
+		notify(w, "Rule updated", true)
+		Editor(*updated, false, "", "").Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("DELETE /_ui/api/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if !srv.DeleteRule(id) {
-			writeJSON(w, http.StatusNotFound, mapError("rule not found"))
+		if !srv.DeleteRule(r.PathValue("id")) {
+			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, http.StatusNoContent, nil)
+		notify(w, "Rule deleted", true)
+		w.Header().Set("HX-Trigger-After-Swap", `{"editor-closed":true}`)
 	})
 
 	mux.HandleFunc("PUT /_ui/api/rules/reorder", func(w http.ResponseWriter, r *http.Request) {
 		var ids []string
 		if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-			writeJSON(w, http.StatusBadRequest, mapError("invalid JSON: "+err.Error()))
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
 		if !srv.ReorderRules(ids) {
-			writeJSON(w, http.StatusBadRequest, mapError("invalid order: id list must match current rules"))
+			http.Error(w, "id list must match current rules", http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, srv.WorkingCopy())
+		notify(w, "", true)
 	})
 
 	mux.HandleFunc("PUT /_ui/api/config", func(w http.ResponseWriter, r *http.Request) {
-		var cfg rule.Config
-		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-			writeJSON(w, http.StatusBadRequest, mapError("invalid JSON: "+err.Error()))
-			return
-		}
-		srv.UpdateConfig(cfg.Listen)
-		writeJSON(w, http.StatusOK, srv.GetConfig())
+		r.ParseForm()
+		srv.UpdateConfig(r.FormValue("listen"))
+		notify(w, "Listen address staged — restart after save to apply", true)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		SettingsPanel(srv.GetConfig()).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("POST /_ui/api/save", func(w http.ResponseWriter, r *http.Request) {
 		if err := srv.Save(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, mapError(err.Error()))
+			toast(w, "Save failed: "+err.Error(), "error")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+		notify(w, "Saved to disk", false)
 	})
 
-	mux.HandleFunc("POST /_ui/api/rules/{id}/test-dry", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		rl := srv.FindRule(id)
-		if rl == nil {
-			writeJSON(w, http.StatusNotFound, mapError("rule not found"))
-			return
-		}
-		probe := decodeProbeRequest(r)
+	// ---- field validation (blur) ----------------------------------------
+
+	mux.HandleFunc("POST /_ui/api/validate", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		DryRunResult(probeMatch(rl, probe)).Render(r.Context(), w)
+		if msg := validateField(r); msg != "" {
+			FieldError(msg).Render(r.Context(), w)
+		}
 	})
 
-	mux.HandleFunc("POST /_ui/api/rules/{id}/test-probe", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		rl := srv.FindRule(id)
-		if rl == nil {
-			writeJSON(w, http.StatusNotFound, mapError("rule not found"))
+	// ---- testing ---------------------------------------------------------
+
+	mux.HandleFunc("POST /_ui/api/test-dry", func(w http.ResponseWriter, r *http.Request) {
+		rl := ruleFromForm(r)
+		probe := decodeProbeRequest(r)
+		req, err := http.NewRequest(probe.Method, probe.Path, strings.NewReader(probe.Body))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err != nil {
+			TestError("invalid probe request: "+err.Error()).Render(r.Context(), w)
 			return
 		}
+		for k, v := range probe.Headers {
+			req.Header.Set(k, v)
+		}
+		rv := rule.Explain(&rl, req, []byte(probe.Body))
+		DryRunResult(rv).Render(r.Context(), w)
+	})
+
+	mux.HandleFunc("POST /_ui/api/test-probe", func(w http.ResponseWriter, r *http.Request) {
 		probe := decodeProbeRequest(r)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		resp, err := sendProbe(srv.ListenAddr(), probe)
 		if err != nil {
-			fmt.Fprintf(w, `<div class="test-result error">probe failed: %s</div>`, html.EscapeString(err.Error()))
+			TestError("probe failed: "+err.Error()).Render(r.Context(), w)
 			return
 		}
 		ProbeResultView(*resp).Render(r.Context(), w)
 	})
 
-	RegisterPartials(mux, srv)
-	return mux.ServeHTTP
-}
-
-func RegisterPartials(mux *http.ServeMux, srv *server.Server) {
-	mux.HandleFunc("GET /_ui/partials/sidebar", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /_ui/api/template-preview", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		Sidebar(srv.WorkingCopy(), srv.HasUnsaved()).Render(r.Context(), w)
+		probe := decodeProbeRequest(r)
+		result, err := executePreview(r.FormValue("body"), probe)
+		if err != nil {
+			TestError("template error: "+err.Error()).Render(r.Context(), w)
+			return
+		}
+		TemplatePreview(result).Render(r.Context(), w)
+	})
+
+	// ---- partials --------------------------------------------------------
+
+	mux.HandleFunc("GET /_ui/partials/rail", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		Rail(srv.WorkingCopy(), srv.HasUnsaved()).Render(r.Context(), w)
+	})
+
+	mux.HandleFunc("GET /_ui/partials/journal", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		JournalPanel(srv.Journal().Entries(nil)).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /_ui/partials/rule-editor/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		rl := srv.FindRule(id)
+		rl := srv.FindRule(r.PathValue("id"))
 		if rl == nil {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		RuleEditor(*rl).Render(r.Context(), w)
+		Editor(*rl, false, "", r.URL.Query().Get("highlight")).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /_ui/partials/new-rule", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		RuleEditor(rule.Rule{}).Render(r.Context(), w)
-	})
-
-	mux.HandleFunc("GET /_ui/partials/journal", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		entries := srv.Journal().Entries(nil)
-		if entries == nil {
-			entries = []server.JournalEntry{}
+		rl := rule.Rule{Request: rule.Request{Method: "GET"}, Response: rule.Response{Status: 200}}
+		if seq, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64); err == nil {
+			if e, ok := srv.Journal().Find(seq); ok {
+				rl = ruleFromEntry(e)
+			}
 		}
-		JournalPanel(entries).Render(r.Context(), w)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		Editor(rl, true, "", "").Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /_ui/partials/settings", func(w http.ResponseWriter, r *http.Request) {
@@ -172,37 +219,206 @@ func RegisterPartials(mux *http.ServeMux, srv *server.Server) {
 		SettingsPanel(srv.GetConfig()).Render(r.Context(), w)
 	})
 
-	mux.HandleFunc("GET /_ui/partials/template-preview/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		rl := srv.FindRule(id)
-		if rl == nil {
-			http.NotFound(w, r)
-			return
-		}
-		if !rl.Response.Template {
-			writeJSON(w, http.StatusBadRequest, mapError("template not enabled for this rule"))
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		var probe ProbeRequest
-		if r.Body != nil {
-			json.NewDecoder(r.Body).Decode(&probe)
-		}
-		if probe.Method == "" {
-			probe.Method = "GET"
-		}
-		if probe.Path == "" {
-			probe.Path = "/sample"
-		}
-
-		result, err := ExecuteTemplateForPreview(rl.Response.Body, probe)
-		if err != nil {
-			TemplatePreview("", err.Error()).Render(r.Context(), w)
-		} else {
-			TemplatePreview(result, "").Render(r.Context(), w)
-		}
-	})
+	return mux.ServeHTTP
 }
+
+// notify sets HX-Trigger events consumed by the shell: rail refresh, the
+// unsaved flag (drives the badge + beforeunload warning), and an optional toast.
+func notify(w http.ResponseWriter, toastMsg string, unsaved bool) {
+	events := map[string]any{"rail-refresh": true, "unsaved": unsaved}
+	if toastMsg != "" {
+		events["toast"] = map[string]string{"msg": toastMsg, "type": "success"}
+	}
+	b, _ := json.Marshal(events)
+	w.Header().Set("HX-Trigger", string(b))
+}
+
+func toast(w http.ResponseWriter, msg, typ string) {
+	b, _ := json.Marshal(map[string]any{"toast": map[string]string{"msg": msg, "type": typ}})
+	w.Header().Set("HX-Trigger", string(b))
+}
+
+// ---- form decoding -------------------------------------------------------
+
+func ruleFromForm(r *http.Request) rule.Rule {
+	r.ParseForm()
+	status, _ := strconv.Atoi(r.FormValue("status"))
+	rl := rule.Rule{
+		Name: r.FormValue("name"),
+		Request: rule.Request{
+			Method:   r.FormValue("method"),
+			Path:     r.FormValue("path"),
+			PathMode: r.FormValue("path_mode"),
+			Headers:  kvFromForm(r, "reqh"),
+			Query:    kvFromForm(r, "reqq"),
+		},
+		Response: rule.Response{
+			Status:   status,
+			Headers:  kvFromForm(r, "resph"),
+			Body:     r.FormValue("body"),
+			BodyFile: r.FormValue("body_file"),
+			Delay:    r.FormValue("delay"),
+			Template: r.FormValue("template") != "",
+		},
+	}
+	if mode := r.FormValue("body_mode"); mode != "" && mode != "none" {
+		rl.Request.Body = &rule.BodyMatch{Mode: mode, Value: r.FormValue("body_match")}
+	}
+	return rl
+}
+
+func kvFromForm(r *http.Request, prefix string) map[string]string {
+	keys, vals := r.Form[prefix+"_k"], r.Form[prefix+"_v"]
+	m := make(map[string]string)
+	for i, k := range keys {
+		if k == "" || i >= len(vals) {
+			continue
+		}
+		m[k] = vals[i]
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// ruleFromEntry seeds a new rule from a captured request (rule-from-request).
+// Headers are deliberately not copied: matching on captured User-Agent and
+// friends produces brittle rules; they stay visible in the journal for
+// manual cherry-picking.
+func ruleFromEntry(e server.JournalEntry) rule.Rule {
+	rl := rule.Rule{
+		Name: strings.ToLower(e.Method) + " " + e.Path,
+		Request: rule.Request{
+			Method: e.Method,
+			Path:   e.Path,
+		},
+		Response: rule.Response{Status: 200},
+	}
+	if q, err := url.ParseQuery(e.Query); err == nil && len(q) > 0 {
+		rl.Request.Query = make(map[string]string, len(q))
+		for k, vs := range q {
+			rl.Request.Query[k] = vs[0]
+		}
+	}
+	if e.Body != "" {
+		rl.Request.Body = &rule.BodyMatch{Mode: "exact", Value: e.Body}
+	}
+	return rl
+}
+
+func validateField(r *http.Request) string {
+	switch r.FormValue("field") {
+	case "path":
+		path := r.FormValue("path")
+		if path == "" {
+			return "path is required"
+		}
+		if r.FormValue("path_mode") == "regex" {
+			if _, err := regexp.Compile(path); err != nil {
+				return "invalid regex: " + err.Error()
+			}
+		}
+	case "delay":
+		if d := r.FormValue("delay"); d != "" {
+			if _, err := time.ParseDuration(d); err != nil {
+				return `invalid duration (e.g. 500ms, 2s)`
+			}
+		}
+	case "status":
+		s := r.FormValue("status")
+		n, err := strconv.Atoi(s)
+		if s == "" || err != nil || n < 100 || n > 599 {
+			return "status must be 100-599"
+		}
+	}
+	return ""
+}
+
+// ---- probing -------------------------------------------------------------
+
+type ProbeRequest struct {
+	Method  string
+	Path    string
+	Headers map[string]string
+	Body    string
+}
+
+type ProbeResult struct {
+	Status  int
+	Headers map[string]string
+	Body    string
+}
+
+func decodeProbeRequest(r *http.Request) ProbeRequest {
+	r.ParseForm()
+	p := ProbeRequest{
+		Method:  r.FormValue("probe_method"),
+		Path:    r.FormValue("probe_path"),
+		Headers: parseHeaderLines(r.FormValue("probe_headers")),
+		Body:    r.FormValue("probe_body"),
+	}
+	if p.Method == "" {
+		p.Method = "GET"
+	}
+	if p.Path == "" {
+		p.Path = "/"
+	}
+	return p
+}
+
+// parseHeaderLines parses "Key: Value" lines, one header per line.
+func parseHeaderLines(s string) map[string]string {
+	m := make(map[string]string)
+	for _, line := range strings.Split(s, "\n") {
+		k, v, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(k) == "" {
+			continue
+		}
+		m[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+func sendProbe(addr string, probe ProbeRequest) (*ProbeResult, error) {
+	req, err := http.NewRequest(probe.Method, "http://"+addr+probe.Path, strings.NewReader(probe.Body))
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range probe.Headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	headers := make(map[string]string)
+	for k := range resp.Header {
+		headers[k] = resp.Header.Get(k)
+	}
+
+	return &ProbeResult{Status: resp.StatusCode, Headers: headers, Body: string(respBody)}, nil
+}
+
+func executePreview(body string, probe ProbeRequest) (string, error) {
+	req, err := http.NewRequest(probe.Method, probe.Path, nil)
+	if err != nil {
+		return "", err
+	}
+	for k, v := range probe.Headers {
+		req.Header.Set(k, v)
+	}
+	return rule.ExecuteTemplate(body, req, []byte(probe.Body), func(*rule.RequestFilter) int64 { return 0 })
+}
+
+// ---- admin API (programmatic, unchanged contract) --------------------------
 
 func AdminHandler(journal *server.Journal) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -219,8 +435,7 @@ func AdminHandler(journal *server.Journal) http.HandlerFunc {
 
 		case r.URL.Path == "/__admin/requests/count" && r.Method == "GET":
 			filter := parseFilter(r)
-			count := journal.Count(filter)
-			json.NewEncoder(w).Encode(map[string]int{"count": count})
+			json.NewEncoder(w).Encode(map[string]int{"count": journal.Count(filter)})
 
 		case r.URL.Path == "/__admin/requests" && r.Method == "DELETE":
 			journal.Clear()
@@ -263,79 +478,4 @@ func parseFilter(r *http.Request) *rule.RequestFilter {
 		f.Query = nil
 	}
 	return f
-}
-
-func decodeProbeRequest(r *http.Request) ProbeRequest {
-	r.ParseForm()
-	p := ProbeRequest{
-		Method:  r.FormValue("probe_method"),
-		Path:    r.FormValue("probe_path"),
-		Headers: make(map[string]string),
-		Body:    r.FormValue("probe_body"),
-	}
-	if p.Method == "" {
-		p.Method = "GET"
-	}
-	if p.Path == "" {
-		p.Path = "/"
-	}
-	if h := r.FormValue("probe_headers"); h != "" {
-		json.Unmarshal([]byte(h), &p.Headers)
-	}
-	return p
-}
-
-func ExecuteTemplateForPreview(body string, probe ProbeRequest) (string, error) {
-	return rule.ExecuteTemplate(body, nil, []byte(probe.Body), func(*rule.RequestFilter) int64 { return 0 })
-}
-
-func probeMatch(rl *rule.Rule, probe ProbeRequest) bool {
-	r, _ := http.NewRequest(probe.Method, probe.Path, strings.NewReader(probe.Body))
-	for k, v := range probe.Headers {
-		r.Header.Set(k, v)
-	}
-	return rule.Match(rl, r, []byte(probe.Body))
-}
-
-func sendProbe(addr string, probe ProbeRequest) (*ProbeResult, error) {
-	body := strings.NewReader(probe.Body)
-	req, err := http.NewRequest(probe.Method, "http://"+addr+probe.Path, body)
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range probe.Headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	headers := make(map[string]string)
-	for k := range resp.Header {
-		headers[k] = resp.Header.Get(k)
-	}
-
-	return &ProbeResult{
-		Status:  resp.StatusCode,
-		Headers: headers,
-		Body:    string(respBody),
-	}, nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if v != nil {
-		if err := json.NewEncoder(w).Encode(v); err != nil {
-			log.Printf("json encode error: %v", err)
-		}
-	}
-}
-
-func mapError(msg string) map[string]string {
-	return map[string]string{"error": msg}
 }
