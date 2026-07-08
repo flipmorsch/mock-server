@@ -12,3 +12,6 @@ func formatStatus(status int) string {
 func testInit(path string) string {
 	return `{ method: 'GET', path: '` + path + `', headers: '', body: '' }`
 }
+
+func dragStart(idx int) string { return "onDragStart(" + strconv.Itoa(idx) + ", $event)" }
+func dragOver(idx int) string { return "onDragOver($event, " + strconv.Itoa(idx) + ")" }

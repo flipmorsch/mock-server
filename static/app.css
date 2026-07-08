@@ -182,6 +182,10 @@ html, body {
 /* Utilities */
 .mono { font-family: var(--font-mono); }
 
+
+.rule-card.dragging { opacity: 0.4; }
+.rule-card.drag-over { border-top: 2px solid var(--primary); }
+.rule-list { min-height: 40px; }
 .rule-card .status {
   font-size: 10.5px;
   font-weight: 600;

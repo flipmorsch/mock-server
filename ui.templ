@@ -109,6 +109,36 @@ templ Shell(rules []Rule, unsaved bool) {
 			</div>
 			<div class="toast-container" id="toasts"></div>
 			<script>
+			function sidebarReorder(config) {
+				return {
+					rules: config.rules,
+					dragIdx: -1,
+					onDragStart(idx, e) { this.dragIdx = idx; e.target.classList.add('dragging'); },
+					onDragOver(e, idx) { e.preventDefault(); e.target.closest('.rule-card')?.classList.add('drag-over'); },
+					onDragLeave(e) { e.target.closest('.rule-card')?.classList.remove('drag-over'); },
+					onDrop(idx) {
+						document.querySelectorAll('.rule-card').forEach(c => c.classList.remove('drag-over', 'dragging'));
+						if (this.dragIdx < 0 || this.dragIdx === idx) return;
+						const arr = this.rules;
+						const [moved] = arr.splice(this.dragIdx, 1);
+						arr.splice(idx, 0, moved);
+						this.rules = [...arr];
+						this.dragIdx = -1;
+						this.persist();
+					},
+					onDragEnd() { document.querySelectorAll('.rule-card').forEach(c => c.classList.remove('dragging', 'drag-over')); this.dragIdx = -1; },
+					persist() {
+						const ids = this.rules.map(r => r.id);
+						fetch('/_ui/api/rules/reorder', {
+							method: 'PUT',
+							headers: {'Content-Type': 'application/json'},
+							body: JSON.stringify(ids)
+						}).then(() => {
+							htmx.ajax('GET', '/_ui/partials/sidebar', 'aside');
+						});
+					}
+				};
+			}
 			function showToast(msg, type) {
 				var t = document.createElement('div');
 				t.className = 'toast toast-' + (type || 'success');
@@ -129,7 +159,6 @@ templ Sidebar(rules []Rule, unsaved bool) {
 	<aside class="sidebar">
 		<div class="sidebar-header">
 			<input type="text" class="sidebar-search" placeholder="Filter rules..."
-				x-data=""
 				x-on:input="
 					const q = $el.value.toLowerCase();
 					document.querySelectorAll('.rule-card').forEach(c => {
@@ -153,32 +182,35 @@ templ Sidebar(rules []Rule, unsaved bool) {
 				</button>
 			</div>
 		</div>
-		<div class="rule-list" x-data={ sidebarInit(rules) }>
-			for _, rule := range rules {
-				@RuleCard(rule)
+		<div class="rule-list" x-data={ sidebarInit(rules) }
+			x-on:dragover.prevent=""
+			x-on:drop="onDrop(parseInt($event.target.closest('.rule-card')?.dataset?.index))">
+			for i, rule := range rules {
+				<div class="rule-card" draggable="true"
+					x-bind:data-index={ strconv.Itoa(i) }
+					x-on:dragstart={ dragStart(i) }
+					x-on:dragover={ dragOver(i) }
+					x-on:dragleave="onDragLeave($event)"
+					x-on:dragend="onDragEnd()"
+					hx-get={ "/_ui/partials/rule-editor/" + rule.ID }
+					hx-target="#detail-pane"
+					hx-on--after-request="document.querySelectorAll('.rule-card.active').forEach(c => c.classList.remove('active')); event.target.classList.add('active');">
+					<span class={ "method method-" + rule.Request.Method }>
+						if rule.Request.Method != "" {
+							{ rule.Request.Method }
+						} else {
+							ALL
+						}
+					</span>
+					<div class="info">
+						<div class="path">{ rule.Request.Path }</div>
+						<div class="name">{ rule.Name }</div>
+					</div>
+					<span class="status">{ strconv.Itoa(rule.Response.Status) }</span>
+				</div>
 			}
 		</div>
 	</aside>
-}
-
-templ RuleCard(rule Rule) {
-	<div class="rule-card"
-		hx-get={ "/_ui/partials/rule-editor/" + rule.ID }
-		hx-target="#detail-pane"
-		hx-on--after-request="document.querySelectorAll('.rule-card.active').forEach(c => c.classList.remove('active')); event.target.classList.add('active');">
-		<span class={ "method method-" + rule.Request.Method }>
-			if rule.Request.Method != "" {
-				{ rule.Request.Method }
-			} else {
-				ALL
-			}
-		</span>
-		<div class="info">
-			<div class="path">{ rule.Request.Path }</div>
-			<div class="name">{ rule.Name }</div>
-		</div>
-		<span class="status">{ strconv.Itoa(rule.Response.Status) }</span>
-	</div>
 }
 
 templ MethodBadge(method string) {
