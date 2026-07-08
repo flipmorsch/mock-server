@@ -367,11 +367,13 @@ templ TestPanel(rl rule.Rule) {
 					<button type="button" class="btn btn-secondary btn-sm"
 						hx-post={ "/_ui/api/rules/" + rl.ID + "/test-dry" }
 						hx-include="closest .test-panel-body"
-						hx-target="next .test-result">Dry Run</button>
+						hx-target="next .test-result"
+						hx-swap="outerHTML">Dry Run</button>
 					<button type="button" class="btn btn-primary btn-sm"
 						hx-post={ "/_ui/api/rules/" + rl.ID + "/test-probe" }
 						hx-include="closest .test-panel-body"
-						hx-target="next .test-result">Probe</button>
+						hx-target="next .test-result"
+						hx-swap="outerHTML">Probe</button>
 				</div>
 			</div>
 			<div class="form-group">
@@ -384,65 +386,6 @@ templ TestPanel(rl rule.Rule) {
 			</div>
 			<div class="test-result"></div>
 		</div>
-	</div>
-}
-
-templ EmptyRuleEditor() {
-	<div class="editor">
-		<div class="editor-header">
-			<h2 class="editor-title">New Rule</h2>
-		</div>
-		<form hx-post="/_ui/api/rules" hx-target="#detail-pane" hx-swap="outerHTML"
-			hx-on--after-request="htmx.ajax('GET', '/_ui/partials/sidebar', 'aside')">
-			<div class="form-section">
-				<div class="form-section-title">General</div>
-				<div class="form-group">
-					<label>Name</label>
-					<input type="text" name="name" placeholder="e.g. Get Users"/>
-				</div>
-				<div class="form-row">
-					<div class="form-group">
-						<label>Method</label>
-						<select name="method">
-							<option value="GET" selected="selected">GET</option>
-							for _, m := range []string{"POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
-								<option value={ m }>{ m }</option>
-							}
-						</select>
-					</div>
-					<div class="form-group">
-						<label>Path</label>
-						<input type="text" name="path" class="mono" placeholder="/api/users"/>
-					</div>
-					<div class="form-group">
-						<label>Path Mode</label>
-						<select name="path_mode">
-							<option value="exact" selected="selected">exact</option>
-							<option value="prefix">prefix</option>
-							<option value="regex">regex</option>
-						</select>
-					</div>
-				</div>
-			</div>
-			<div class="form-section">
-				<div class="form-section-title">Response</div>
-				<div class="form-row form-row-2">
-					<div class="form-group">
-						<label>Status Code</label>
-						<input type="number" name="status" value="200" min="100" max="599"/>
-					</div>
-					<div class="form-group">
-						<label>Delay</label>
-						<input type="text" name="delay" class="mono" placeholder="e.g. 500ms, 2s"/>
-					</div>
-				</div>
-				<div class="form-group">
-					<label>Body</label>
-					<textarea name="body" rows="6" class="mono"></textarea>
-				</div>
-			</div>
-			<button type="submit" class="btn btn-primary">Create Rule</button>
-		</form>
 	</div>
 }
 
@@ -525,9 +468,6 @@ templ ResponseForm(rl rule.Rule) {
 			</div>
 
 			<div x-show="bodyType === 'file'">
-				<div class="form-group">
-					<input type="file" name="body_file_upload" class="file-upload"/>
-				</div>
 				if rl.Response.BodyFile != "" {
 					<div class="mono" style="font-size:12px; color: var(--text-muted);">{ rl.Response.BodyFile }</div>
 				}
@@ -593,29 +533,23 @@ templ TemplatePreview(result string, err string) {
 }
 
 templ DryRunResult(matched bool) {
-	<div class="mt-3 p-3 border rounded text-sm">
-		if matched {
-			<div class="rounded p-3 text-green-700 bg-green-50 border border-green-200">
-				<span class="font-semibold">Match</span> — rule matches the request
-			</div>
-		} else {
-			<div class="rounded p-3 text-amber-700 bg-amber-50 border border-amber-200">
-				<span class="font-semibold">No Match</span> — rule does not match the request
-			</div>
-		}
-	</div>
+	if matched {
+		<div class="test-result success"><strong>Match</strong> — rule matches the request</div>
+	} else {
+		<div class="test-result fail"><strong>No Match</strong> — rule does not match the request</div>
+	}
 }
 
 templ ProbeResultView(result ProbeResult) {
-	<div class="mt-3 p-3 border rounded bg-gray-50 space-y-3 text-sm">
+	<div class="test-result">
 		<div>
-			<span class="font-medium text-gray-700">Status:</span>
+			Status:
 			@StatusBadge(result.Status)
 		</div>
 		if len(result.Headers) > 0 {
 			<details>
-				<summary class="text-gray-600 cursor-pointer hover:text-gray-800">Headers ({ strconv.Itoa(len(result.Headers)) })</summary>
-				<pre class="mt-2 text-xs font-mono text-gray-700 whitespace-pre-wrap bg-gray-100 p-2 rounded">
+				<summary>Headers ({ strconv.Itoa(len(result.Headers)) })</summary>
+				<pre>
 				for k, v := range result.Headers {
 					{ k }:{ " " }{ v }
 					{ "\n" }
@@ -625,7 +559,7 @@ templ ProbeResultView(result ProbeResult) {
 		}
 		if result.Body != "" {
 			<details open>
-				<summary class="text-gray-600 cursor-pointer hover:text-gray-800">Body</summary>
+				<summary>Body</summary>
 				@templ.Raw(highlightBody(result.Body))
 			</details>
 		}

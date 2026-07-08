@@ -3,12 +3,19 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"strings"
+)
+
+const (
+	sepNone  = iota // start of doc, or right after a key's ": "
+	sepOpen         // just opened a container: newline+indent, no comma
+	sepValue        // a value just ended: comma+newline+indent
 )
 
 func highlightJSON(raw string) string {
 	if !json.Valid([]byte(raw)) {
-		return raw
+		return html.EscapeString(raw)
 	}
 
 	dec := json.NewDecoder(strings.NewReader(raw))
@@ -17,8 +24,24 @@ func highlightJSON(raw string) string {
 	var out strings.Builder
 	depth := 0
 	stack := make([]byte, 0, 16) // '{' or '['
-	first := true
-	needKey := false
+	sep := sepNone
+	expectKey := false
+
+	emitSep := func() {
+		switch sep {
+		case sepOpen:
+			out.WriteString("\n")
+			out.WriteString(spaces(depth * 2))
+		case sepValue:
+			out.WriteString(span("json-punct", ","))
+			out.WriteString("\n")
+			out.WriteString(spaces(depth * 2))
+		}
+	}
+	endValue := func() {
+		sep = sepValue
+		expectKey = len(stack) > 0 && stack[len(stack)-1] == '{'
+	}
 
 	for {
 		tok, err := dec.Token()
@@ -26,53 +49,50 @@ func highlightJSON(raw string) string {
 			break
 		}
 
-		if !first {
-			if d, ok := tok.(json.Delim); ok && (d == '{' || d == '[') {
-			} else if !needKey || len(stack) == 0 {
-				out.WriteString(",\n")
-				out.WriteString(spaces(depth * 2))
-			}
-		}
-		first = false
-
 		switch v := tok.(type) {
 		case json.Delim:
 			switch v {
 			case '{', '[':
-				if v == '{' {
-					needKey = true
-				}
-				stack = append(stack, byte(v))
+				emitSep()
 				out.WriteString(span("json-punct", string(v)))
+				stack = append(stack, byte(v))
 				depth++
-				out.WriteString("\n")
-				out.WriteString(spaces(depth * 2))
+				sep = sepOpen
+				expectKey = v == '{'
 			case '}', ']':
 				depth--
 				stack = stack[:len(stack)-1]
-				if len(stack) > 0 && stack[len(stack)-1] == '{' {
-					needKey = false
+				if sep != sepOpen { // empty containers close on the same line
+					out.WriteString("\n")
+					out.WriteString(spaces(depth * 2))
 				}
-				out.WriteString("\n")
-				out.WriteString(spaces(depth * 2))
 				out.WriteString(span("json-punct", string(v)))
+				endValue()
 			}
 		case string:
-			if needKey && len(stack) > 0 && stack[len(stack)-1] == '{' {
-				b, _ := json.Marshal(v)
+			emitSep()
+			b, _ := json.Marshal(v)
+			if expectKey {
 				out.WriteString(span("json-key", string(b)))
 				out.WriteString(span("json-punct", ": "))
-				needKey = false
+				sep = sepNone
+				expectKey = false
 			} else {
-				b, _ := json.Marshal(v)
 				out.WriteString(span("json-string", string(b)))
+				endValue()
 			}
 		case json.Number:
+			emitSep()
 			out.WriteString(span("json-number", v.String()))
+			endValue()
 		case bool:
+			emitSep()
 			out.WriteString(span("json-bool", fmt.Sprint(v)))
+			endValue()
 		case nil:
+			emitSep()
 			out.WriteString(span("json-null", "null"))
+			endValue()
 		}
 	}
 
@@ -80,9 +100,7 @@ func highlightJSON(raw string) string {
 }
 
 func highlightBody(body string) string {
-	html := highlightJSON(body)
-	out := fmt.Sprintf("<pre class=\"json-body\">%s</pre>", html)
-	return out
+	return fmt.Sprintf("<pre class=\"json-body\">%s</pre>", highlightJSON(body))
 }
 
 func span(cls, text string) string {

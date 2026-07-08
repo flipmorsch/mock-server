@@ -2,7 +2,8 @@ package server
 
 import (
 	"net/http"
-	"regexp"
+	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -90,22 +91,8 @@ func requestFilterMatch(f *rule.RequestFilter, e *JournalEntry) bool {
 	if f.Method != "" && !strings.EqualFold(f.Method, e.Method) {
 		return false
 	}
-	if f.Path != "" {
-		switch f.PathMode {
-		case "regex":
-			matched, _ := regexp.MatchString(f.Path, e.Path)
-			if !matched {
-				return false
-			}
-		case "prefix":
-			if e.Path != f.Path && !strings.HasPrefix(e.Path, f.Path+"/") {
-				return false
-			}
-		default:
-			if e.Path != f.Path {
-				return false
-			}
-		}
+	if f.Path != "" && !rule.PathMatches(f.PathMode, f.Path, e.Path) {
+		return false
 	}
 	for k, v := range f.Headers {
 		if hv, ok := e.Headers[http.CanonicalHeaderKey(k)]; !ok || hv != v {
@@ -133,17 +120,6 @@ func requestFilterMatch(f *rule.RequestFilter, e *JournalEntry) bool {
 }
 
 func queryParamMatches(queryString, key, value string) bool {
-	if queryString == "" {
-		return false
-	}
-	for _, pair := range strings.Split(queryString, "&") {
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) == 2 && kv[0] == key && kv[1] == value {
-			return true
-		}
-		if len(kv) == 1 && kv[0] == key && value == "" {
-			return true
-		}
-	}
-	return false
+	q, _ := url.ParseQuery(queryString)
+	return slices.Contains(q[key], value)
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -17,89 +16,43 @@ type Server struct {
 	config      *rule.Config
 	workingCopy *rule.Config
 	configPath  string
-	fixturesDir string
 	journal     *Journal
 	uiEnabled   bool
 	unsaved     bool
 	mu          sync.RWMutex
 }
 
-func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled bool, fixturesDir string) *Server {
+func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled bool) *Server {
 	return &Server{
 		config:      cfg,
 		workingCopy: cloneConfig(cfg),
 		configPath:  configPath,
-		fixturesDir: fixturesDir,
 		journal:     journal,
 		uiEnabled:   uiEnabled,
 	}
 }
 
-func NewUUID() string {
+func newID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	return fmt.Sprintf("%x", b)
 }
 
 func cloneConfig(cfg *rule.Config) *rule.Config {
 	if cfg == nil {
 		return &rule.Config{}
 	}
-	rules := make([]rule.Rule, len(cfg.Rules))
-	for i, r := range cfg.Rules {
-		rules[i] = cloneRule(r)
-		if rules[i].ID == "" {
-			rules[i].ID = NewUUID()
+	// ponytail: deep clone via yaml round-trip; config is small and already yaml-serializable
+	data, _ := yaml.Marshal(cfg)
+	var clone rule.Config
+	yaml.Unmarshal(data, &clone)
+	for i := range clone.Rules {
+		if clone.Rules[i].ID == "" {
+			clone.Rules[i].ID = newID()
 		}
 	}
-	return &rule.Config{
-		Listen: cfg.Listen,
-		Rules:  rules,
-	}
+	return &clone
 }
-
-func cloneRule(r rule.Rule) rule.Rule {
-	headers := make(map[string]string)
-	for k, v := range r.Request.Headers {
-		headers[k] = v
-	}
-	query := make(map[string]string)
-	for k, v := range r.Request.Query {
-		query[k] = v
-	}
-	respHeaders := make(map[string]string)
-	for k, v := range r.Response.Headers {
-		respHeaders[k] = v
-	}
-
-	clone := rule.Rule{
-		ID:   r.ID,
-		Name: r.Name,
-		Request: rule.Request{
-			Method:   r.Request.Method,
-			Path:     r.Request.Path,
-			PathMode: r.Request.PathMode,
-			Headers:  headers,
-			Query:    query,
-		},
-		Response: rule.Response{
-			Status:        r.Response.Status,
-			Headers:       respHeaders,
-			Body:          r.Response.Body,
-			BodyFile:      r.Response.BodyFile,
-			Delay:         r.Response.Delay,
-			Template:      r.Response.Template,
-			DelayDuration: r.Response.DelayDuration,
-		},
-	}
-	if r.Request.Body != nil {
-		clone.Request.Body = &rule.BodyMatch{Mode: r.Request.Body.Mode, Value: r.Request.Body.Value}
-	}
-	return clone
-}
-
 
 func (s *Server) WorkingCopy() []rule.Rule {
 	s.mu.RLock()
@@ -127,7 +80,7 @@ func (s *Server) FindRule(id string) *rule.Rule {
 func (s *Server) CreateRule(r rule.Rule) rule.Rule {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r.ID = NewUUID()
+	r.ID = newID()
 	s.workingCopy.Rules = append(s.workingCopy.Rules, r)
 	s.unsaved = true
 	return r
@@ -218,10 +171,6 @@ func (s *Server) Save() error {
 	s.config = cloneConfig(s.workingCopy)
 	s.unsaved = false
 	return nil
-}
-
-func (s *Server) ResolveFixturePath(filename string) string {
-	return filepath.Join(s.fixturesDir, filepath.Base(filename))
 }
 
 func (s *Server) Journal() *Journal {

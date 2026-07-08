@@ -37,20 +37,17 @@ func Match(rule *Rule, r *http.Request, body []byte) bool {
 		}
 	}
 
-	mode := rule.Request.PathMode
-	if mode == "" {
-		mode = "exact"
-	}
+	return PathMatches(rule.Request.PathMode, rule.Request.Path, r.URL.Path)
+}
 
+func PathMatches(mode, pattern, path string) bool {
 	switch mode {
-	case "exact":
-		return rule.Request.Path == r.URL.Path
 	case "prefix":
-		return r.URL.Path == rule.Request.Path || strings.HasPrefix(r.URL.Path, rule.Request.Path+"/")
+		return path == pattern || strings.HasPrefix(path, pattern+"/")
 	case "regex":
-		matched, _ := regexp.MatchString(rule.Request.Path, r.URL.Path)
+		matched, _ := regexp.MatchString(pattern, path)
 		return matched
+	default:
+		return path == pattern
 	}
-
-	return false
 }

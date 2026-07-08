@@ -44,6 +44,28 @@ func TestHighlightBodyInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestHighlightBodyInvalidJSONEscaped(t *testing.T) {
+	html := highlightBody("<script>alert(1)</script>")
+	if strings.Contains(html, "<script>") {
+		t.Errorf("non-JSON body must be HTML-escaped, got: %s", html)
+	}
+}
+
+func TestHighlightBodyLayout(t *testing.T) {
+	html := highlightBody(`{"a":1,"b":[true,null],"c":{}}`)
+	want := `<pre class="json-body"><span class="json-punct">{</span>
+  <span class="json-key">"a"</span><span class="json-punct">: </span><span class="json-number">1</span><span class="json-punct">,</span>
+  <span class="json-key">"b"</span><span class="json-punct">: </span><span class="json-punct">[</span>
+    <span class="json-bool">true</span><span class="json-punct">,</span>
+    <span class="json-null">null</span>
+  <span class="json-punct">]</span><span class="json-punct">,</span>
+  <span class="json-key">"c"</span><span class="json-punct">: </span><span class="json-punct">{</span><span class="json-punct">}</span>
+<span class="json-punct">}</span></pre>`
+	if html != want {
+		t.Errorf("layout mismatch:\ngot:\n%s\nwant:\n%s", html, want)
+	}
+}
+
 func TestHighlightBodyNested(t *testing.T) {
 	raw := `{"user":{"name":"Bob","scores":[1,2,3]}}`
 	html := highlightBody(raw)

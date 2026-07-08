@@ -2,12 +2,12 @@ package ui
 
 import (
 	"encoding/json"
+	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"mock-server/internal/rule"
@@ -35,11 +35,7 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 
 	mux.HandleFunc("GET /_ui/{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		ShellPage(srv, w)
-	})
-
-	mux.HandleFunc("GET /_ui/api/rules", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, srv.WorkingCopy())
+		Shell(srv.WorkingCopy(), srv.HasUnsaved()).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("POST /_ui/api/rules", func(w http.ResponseWriter, r *http.Request) {
@@ -50,16 +46,6 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 		}
 		created := srv.CreateRule(rl)
 		writeJSON(w, http.StatusCreated, created)
-	})
-
-	mux.HandleFunc("GET /_ui/api/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		rl := srv.FindRule(id)
-		if rl == nil {
-			writeJSON(w, http.StatusNotFound, mapError("rule not found"))
-			return
-		}
-		writeJSON(w, http.StatusOK, rl)
 	})
 
 	mux.HandleFunc("PUT /_ui/api/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -99,10 +85,6 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, srv.WorkingCopy())
 	})
 
-	mux.HandleFunc("GET /_ui/api/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, srv.GetConfig())
-	})
-
 	mux.HandleFunc("PUT /_ui/api/config", func(w http.ResponseWriter, r *http.Request) {
 		var cfg rule.Config
 		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
@@ -121,10 +103,6 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 	})
 
-	mux.HandleFunc("GET /_ui/api/unsaved", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]bool{"unsaved": srv.HasUnsaved()})
-	})
-
 	mux.HandleFunc("POST /_ui/api/rules/{id}/test-dry", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		rl := srv.FindRule(id)
@@ -133,8 +111,8 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 			return
 		}
 		probe := decodeProbeRequest(r)
-		matched := probeMatch(rl, probe)
-		writeJSON(w, http.StatusOK, map[string]bool{"matched": matched})
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		DryRunResult(probeMatch(rl, probe)).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("POST /_ui/api/rules/{id}/test-probe", func(w http.ResponseWriter, r *http.Request) {
@@ -145,50 +123,13 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 			return
 		}
 		probe := decodeProbeRequest(r)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		resp, err := sendProbe(srv.ListenAddr(), probe)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, mapError("probe failed: "+err.Error()))
+			fmt.Fprintf(w, `<div class="test-result error">probe failed: %s</div>`, html.EscapeString(err.Error()))
 			return
 		}
-		writeJSON(w, http.StatusOK, resp)
-	})
-
-	mux.HandleFunc("GET /_ui/api/journal", func(w http.ResponseWriter, r *http.Request) {
-		entries := srv.Journal().Entries(nil)
-		if entries == nil {
-			entries = []server.JournalEntry{}
-		}
-		writeJSON(w, http.StatusOK, entries)
-	})
-
-	mux.HandleFunc("POST /_ui/api/upload", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseMultipartForm(10 << 20)
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, mapError("upload failed: "+err.Error()))
-			return
-		}
-		defer file.Close()
-
-		destPath := srv.ResolveFixturePath(header.Filename)
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			writeJSON(w, http.StatusInternalServerError, mapError("mkdir failed: "+err.Error()))
-			return
-		}
-		dst, err := os.Create(destPath)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, mapError("create file failed: "+err.Error()))
-			return
-		}
-		defer dst.Close()
-		if _, err := io.Copy(dst, file); err != nil {
-			writeJSON(w, http.StatusInternalServerError, mapError("write failed: "+err.Error()))
-			return
-		}
-		writeJSON(w, http.StatusCreated, map[string]string{
-			"filename": header.Filename,
-			"path":     destPath,
-		})
+		ProbeResultView(*resp).Render(r.Context(), w)
 	})
 
 	RegisterPartials(mux, srv)
@@ -198,7 +139,7 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 func RegisterPartials(mux *http.ServeMux, srv *server.Server) {
 	mux.HandleFunc("GET /_ui/partials/sidebar", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		RenderSidebar(srv, w)
+		Sidebar(srv.WorkingCopy(), srv.HasUnsaved()).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /_ui/partials/rule-editor/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -209,12 +150,12 @@ func RegisterPartials(mux *http.ServeMux, srv *server.Server) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		RenderRuleEditor(srv, *rl, w)
+		RuleEditor(*rl).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /_ui/partials/new-rule", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		RenderRuleEditor(srv, rule.Rule{}, w)
+		RuleEditor(rule.Rule{}).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /_ui/partials/journal", func(w http.ResponseWriter, r *http.Request) {
@@ -223,12 +164,12 @@ func RegisterPartials(mux *http.ServeMux, srv *server.Server) {
 		if entries == nil {
 			entries = []server.JournalEntry{}
 		}
-		RenderJournal(entries, w)
+		JournalPanel(entries).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /_ui/partials/settings", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		RenderSettings(srv, w)
+		SettingsPanel(srv.GetConfig()).Render(r.Context(), w)
 	})
 
 	mux.HandleFunc("GET /_ui/partials/template-preview/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -256,9 +197,9 @@ func RegisterPartials(mux *http.ServeMux, srv *server.Server) {
 
 		result, err := ExecuteTemplateForPreview(rl.Response.Body, probe)
 		if err != nil {
-			RenderTemplatePreview("", err.Error(), w)
+			TemplatePreview("", err.Error()).Render(r.Context(), w)
 		} else {
-			RenderTemplatePreview(result, "", w)
+			TemplatePreview(result, "").Render(r.Context(), w)
 		}
 	})
 }
@@ -344,6 +285,10 @@ func decodeProbeRequest(r *http.Request) ProbeRequest {
 	return p
 }
 
+func ExecuteTemplateForPreview(body string, probe ProbeRequest) (string, error) {
+	return rule.ExecuteTemplate(body, nil, []byte(probe.Body), func(*rule.RequestFilter) int64 { return 0 })
+}
+
 func probeMatch(rl *rule.Rule, probe ProbeRequest) bool {
 	r, _ := http.NewRequest(probe.Method, probe.Path, strings.NewReader(probe.Body))
 	for k, v := range probe.Headers {
@@ -394,4 +339,3 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 func mapError(msg string) map[string]string {
 	return map[string]string{"error": msg}
 }
-

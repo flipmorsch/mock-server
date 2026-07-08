@@ -401,4 +401,3 @@ func TestMatchQueryStringIgnored(t *testing.T) {
 		t.Error("query string should not affect exact path matching")
 	}
 }
-

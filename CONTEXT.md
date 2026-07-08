@@ -56,9 +56,6 @@ A live log of recent HTTP requests visible in the UI, stored as an in-memory rin
 ### Validation
 Rule fields are validated on blur (per-field) and at Save time (cross-field). Invalid fields show inline errors. The server validates the entire configuration on Save and rejects invalid saves.
 
-### File Upload
-The UI supports uploading files for `body_file` responses. Files are saved to a configurable fixtures directory (`--fixtures-dir`, defaults to `./fixtures` relative to the config file). Uploads are capped at 10MB.
-
 ### Save Behavior
 Save serializes the entire in-memory state to the YAML file (full rewrite). Formatting of the original file is not preserved. The `listen` address is written to the file on save, but the server stays bound to its original address until restart; the UI notifies the user when a restart is needed.
 

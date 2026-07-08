@@ -21,7 +21,6 @@ func main() {
 	listenOverride := flag.String("listen", "", "override listen address (e.g., 127.0.0.1:8080)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	uiEnabled := flag.Bool("ui", false, "enable embedded Web UI at /_ui/")
-	fixturesDir := flag.String("fixtures-dir", "", "directory for uploaded fixture files (default: ./fixtures)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: mock-server [flags] <config.yaml>\n")
 		flag.PrintDefaults()
@@ -51,13 +50,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	fixDir := *fixturesDir
-	if fixDir == "" {
-		fixDir = "./fixtures"
-	}
-
 	journal := server.NewJournal()
-	srv := server.NewServer(cfg, configPath, journal, *uiEnabled, fixDir)
+	srv := server.NewServer(cfg, configPath, journal, *uiEnabled)
 
 	addr := srv.ListenAddr()
 	if *listenOverride != "" {
@@ -76,7 +70,6 @@ func main() {
 type handler struct {
 	srv *server.Server
 }
-
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/_ui/") {
