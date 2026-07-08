@@ -127,6 +127,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeResponse(w http.ResponseWriter, resp *rule.Response, r *http.Request, reqBody []byte, journal *server.Journal) {
+	body := resp.Body
+	if resp.BodyFile != "" {
+		data, err := os.ReadFile(resp.BodyFile)
+		if err != nil {
+			log.Printf("body_file error: %v", err)
+			http.Error(w, "body_file read failed", http.StatusInternalServerError)
+			return
+		}
+		body = string(data)
+	}
 	for k, v := range resp.Headers {
 		w.Header().Set(k, v)
 	}
@@ -134,13 +144,12 @@ func writeResponse(w http.ResponseWriter, resp *rule.Response, r *http.Request, 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	}
 	w.WriteHeader(resp.Status)
-	if resp.Body == "" {
+	if body == "" {
 		return
 	}
-	body := resp.Body
 	if resp.Template {
 		var err error
-		body, err = rule.ExecuteTemplate(resp.Body, r, reqBody, func(f *rule.RequestFilter) int64 { return int64(journal.Count(f)) })
+		body, err = rule.ExecuteTemplate(body, r, reqBody, func(f *rule.RequestFilter) int64 { return int64(journal.Count(f)) })
 		if err != nil {
 			log.Printf("template error: %v", err)
 			return

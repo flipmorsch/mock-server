@@ -24,6 +24,8 @@ Defaults to exact if mode is omitted.
 ### Response
 A Rule's response specifies an HTTP status code, optional headers, and a body (inline `body` or via `body_file`, mutually exclusive). If no `Content-Type` header is specified, the server sets `Content-Type: text/plain; charset=utf-8`.
 
+`body_file` is checked for readability at startup and read from disk each time the response is served — edits to the file take effect without restart, and Save preserves the reference rather than inlining the content. If the file becomes unreadable at serve time, the server responds 500.
+
 ### Latency
 A Rule may include a `delay` field (e.g. `500ms`, `2s`) to simulate network latency. The server sleeps for the specified duration before writing the response.
 

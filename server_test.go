@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -445,6 +447,10 @@ func TestServerTemplateParseError(t *testing.T) {
 }
 
 func TestServerTemplateWithBodyFile(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "body.tpl")
+	if err := os.WriteFile(f, []byte("path={{.Path}} method={{.Method}}"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	cfg := &Config{
 		Rules: []Rule{
 			{
@@ -456,7 +462,7 @@ func TestServerTemplateWithBodyFile(t *testing.T) {
 				Response: Response{
 					Status:   200,
 					Template: true,
-					Body:     "path={{.Path}} method={{.Method}}",
+					BodyFile: f,
 				},
 			},
 		},
@@ -469,6 +475,15 @@ func TestServerTemplateWithBodyFile(t *testing.T) {
 
 	if w.Body.String() != "path=/tplfile method=GET" {
 		t.Errorf("body = %q, want 'path=/tplfile method=GET'", w.Body.String())
+	}
+
+	if err := os.WriteFile(f, []byte("edited {{.Method}}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/tplfile", nil))
+	if w.Body.String() != "edited GET" {
+		t.Errorf("fixture edits should apply live, got %q", w.Body.String())
 	}
 }
 

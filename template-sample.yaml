@@ -7,65 +7,37 @@ rules:
         path: /rand
         path_mode: exact
         headers:
-            Content-type: text/plain
-        query: {}
-        body: null
+            Content-Type: text/plain
       response:
         status: 200
-        headers: {}
         body: '{{randomString 8}}'
-        body_file: ""
-        delay: ""
         template: true
-        delayduration: 0s
     - id: 78d19f1a-065c-41a7-87f9-fb96758ed455
       name: echo
       request:
         method: GET
         path: /echo
-        path_mode: ""
-        headers: {}
-        query: {}
-        body: null
       response:
         status: 200
-        headers: {}
         body: '{{.Method}} {{.Path}} — query page={{.Query "page"}}'
-        body_file: ""
-        delay: ""
         template: true
-        delayduration: 0s
     - id: bac8579a-9a7b-4bbd-9f91-360ee1315e11
       name: counter
       request:
         method: GET
         path: /count
-        path_mode: ""
-        headers: {}
-        query: {}
-        body: null
       response:
         status: 200
-        headers: {}
         body: 'request #{{counter}} at {{now}}'
-        body_file: ""
-        delay: ""
         template: true
-        delayduration: 0s
-    - id: 01c73d15dee976d1d3ce9c9b0872dedc
+    - id: 01c73d15-dee9-46d1-93ce-9c9b0872dedc
       name: get users
       request:
         method: GET
         path: /users
         path_mode: exact
-        headers: {}
-        query: {}
-        body: null
       response:
         status: 200
-        headers: {}
         body: '{"ok": true, {{.Method}}}'
-        body_file: ""
         delay: 500ms
         template: true
-        delayduration: 0s

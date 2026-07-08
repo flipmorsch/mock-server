@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -42,7 +43,9 @@ func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled 
 func newID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
-	return fmt.Sprintf("%x", b)
+	b[6] = b[6]&0x0f | 0x40 // version 4
+	b[8] = b[8]&0x3f | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func cloneConfig(cfg *rule.Config) *rule.Config {
@@ -56,6 +59,10 @@ func cloneConfig(cfg *rule.Config) *rule.Config {
 	for i := range clone.Rules {
 		if clone.Rules[i].ID == "" {
 			clone.Rules[i].ID = newID()
+		}
+		// DelayDuration is yaml:"-" and doesn't survive the round-trip.
+		if d := clone.Rules[i].Response.Delay; d != "" {
+			clone.Rules[i].Response.DelayDuration, _ = time.ParseDuration(d)
 		}
 	}
 	return &clone
@@ -167,7 +174,7 @@ func (s *Server) Save() error {
 	defer s.mu.Unlock()
 
 	// The file keeps the user's body_file references and raw delay strings;
-	// the serving copy gets the normalized form (inlined bodies, parsed delays).
+	// body_file content is read at serve time, delays are parsed by Validate.
 	serving := cloneConfig(s.workingCopy)
 	if err := serving.Validate(); err != nil {
 		return err

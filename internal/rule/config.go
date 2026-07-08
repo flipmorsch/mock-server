@@ -123,16 +123,15 @@ func (c *Config) Validate() error {
 			rule.Response.Status = 200
 		}
 		if rule.Response.BodyFile != "" {
-			bodyData, err := os.ReadFile(rule.Response.BodyFile)
-			if err != nil {
+			// Readability check only — the file is read at serve time, so the
+			// config keeps the user's reference and fixture edits apply live.
+			if _, err := os.ReadFile(rule.Response.BodyFile); err != nil {
 				return fmt.Errorf("rule %d (%q): reading body_file %q: %w", i+1, rule.Name, rule.Response.BodyFile, err)
 			}
-			rule.Response.Body = string(bodyData)
 		}
 		if rule.Response.Delay != "" {
 			rule.Response.DelayDuration, _ = time.ParseDuration(rule.Response.Delay)
 		}
-		rule.Response.BodyFile = ""
 		c.Rules[i] = rule
 	}
 	return nil

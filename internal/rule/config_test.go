@@ -293,11 +293,11 @@ rules:
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.Rules[0].Response.Body != bodyContent {
-		t.Errorf("body = %q, want %q", cfg.Rules[0].Response.Body, bodyContent)
+	if cfg.Rules[0].Response.Body != "" {
+		t.Errorf("body should stay empty (file is read at serve time), got %q", cfg.Rules[0].Response.Body)
 	}
-	if cfg.Rules[0].Response.BodyFile != "" {
-		t.Error("BodyFile should be cleared after loading")
+	if cfg.Rules[0].Response.BodyFile != bodyFile {
+		t.Errorf("BodyFile = %q, want %q (reference must survive load)", cfg.Rules[0].Response.BodyFile, bodyFile)
 	}
 }
 
