@@ -331,6 +331,9 @@ body.editing .editor-pane {
   margin-left: 4px;
 }
 
+.jdur { color: var(--fg-dim); font-size: 11px; margin-left: 6px; white-space: nowrap; }
+
+
 .jdetail {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
@@ -510,6 +513,37 @@ body.editing .editor-pane {
 }
 .editor-note { color: var(--fg-dim); font-size: 11px; margin-left: auto; }
 .editor-note b { color: var(--fg-mut); }
+
+
+/* tabs */
+
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 14px;
+  background: var(--bg-1);
+}
+.tab-btn {
+  padding: 7px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-mut);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover {
+  color: var(--fg);
+}
+.tab-active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.tab-content { min-height: 200px; }
 
 /* test panel */
 

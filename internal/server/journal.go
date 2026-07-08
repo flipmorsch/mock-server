@@ -22,6 +22,7 @@ type JournalEntry struct {
 	Matched      string             `json:"matched"`
 	MatchedID    string             `json:"matched_id,omitempty"`
 	Status       int                `json:"status"`
+	Duration     time.Duration      `json:"duration_ns"`
 	Explanations []rule.RuleVerdict `json:"explanations,omitempty"`
 }
 

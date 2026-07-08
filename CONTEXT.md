@@ -43,7 +43,7 @@ The UI supports creating, reading, updating, duplicating, deleting, and reorderi
 An explicit user action that writes the current working copy to the YAML configuration file on disk and immediately updates the running Rule set to match. A failed Save leaves the running Rule set unchanged and shows the error inline in the UI. Unsaved changes trigger a browser warning before navigating away.
 
 ### Rule Identity
-Each Rule carries an auto-generated UUID (`id` field), assigned on creation and persisted into the YAML file on save. Rules are addressed by UUID in the API.
+Each Rule carries an auto-generated RFC-4122 UUID (`id` field), assigned on creation and persisted into the YAML file on save. Rules are addressed by UUID in the API. IDs are compared as opaque strings — legacy IDs in older formats remain valid.
 
 ### Test
 Two test modes per Rule:
@@ -64,7 +64,7 @@ Two actions close the loop from a Match Explanation:
 Rule fields are validated on blur (per-field) and at Save time (cross-field). Invalid fields show inline errors. The server validates the entire configuration on Save and rejects invalid saves.
 
 ### Save Behavior
-Save serializes the entire in-memory state to the YAML file (full rewrite). Formatting of the original file is not preserved. The `listen` address is written to the file on save, but the server stays bound to its original address until restart; the UI notifies the user when a restart is needed.
+Save serializes the entire in-memory state to the YAML file (full rewrite). Formatting of the original file is not preserved. The saved file contains only fields the user set — unset optional fields and internal derived values are omitted, so the output matches the documented Config File Structure. The `listen` address is written to the file on save, but the server stays bound to its original address until restart; the UI notifies the user when a restart is needed.
 
 If the config file does not exist at startup with `--ui`, the server starts with an empty Rule set. The first Save creates the file.
 

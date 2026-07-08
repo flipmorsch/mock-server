@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"mock-server/internal/rule"
 	"mock-server/internal/server"
@@ -109,6 +111,31 @@ func hlSection(highlight string) string {
 	}
 }
 
+
+// tabFromHighlight maps a verdict dim to the editor tab that should be active.
+func tabFromHighlight(highlight string) string {
+	switch {
+	case highlight == "":
+		return "request"
+	case strings.HasPrefix(highlight, "status"), strings.HasPrefix(highlight, "delay"):
+		return "response"
+	default:
+		return "request"
+	}
+}
+
+func fmtDuration(d time.Duration) string {
+	switch {
+	case d < time.Microsecond:
+		return fmt.Sprintf("%dns", d.Nanoseconds())
+	case d < time.Millisecond:
+		return fmt.Sprintf("%.1fµs", float64(d.Nanoseconds())/1000)
+	case d < time.Second:
+		return fmt.Sprintf("%.1fms", float64(d.Microseconds())/1000)
+	default:
+		return fmt.Sprintf("%.2fs", d.Seconds())
+	}
+}
 func bodyModeVal(b *rule.BodyMatch) string {
 	if b == nil {
 		return "none"
@@ -292,6 +319,7 @@ templ JournalRow(e server.JournalEntry) {
 				}
 			</span>
 			<span class={ statusClass(e.Status) }>{ strconv.Itoa(e.Status) }</span>
+			<span class="jdur">{ fmtDuration(e.Duration) }</span>
 			if e.Matched != "" {
 				<span class="jmatch">→ { e.Matched }</span>
 			} else {
@@ -399,7 +427,7 @@ templ VerdictBlock(rv rule.RuleVerdict) {
 // ---------------------------------------------------------------
 
 templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
-	<div class="editor" id="editor">
+	<div class="editor" id="editor" x-data={ "{tpl: " + strconv.FormatBool(rl.Response.Template) + ", activeTab: '" + tabFromHighlight(highlight) + "'}" }>
 		<div class="editor-head">
 			<span class="editor-title">
 				if isNew {
@@ -415,9 +443,14 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 		if errMsg != "" {
 			<div class="banner-error">{ errMsg }</div>
 		}
+
+		<div class="tabs">
+			<button type="button" class="tab-btn" :class="{ 'tab-active': activeTab === 'request' }" x-on:click="activeTab = 'request'">Request</button>
+			<button type="button" class="tab-btn" :class="{ 'tab-active': activeTab === 'response' }" x-on:click="activeTab = 'response'">Response</button>
+			<button type="button" class="tab-btn" :class="{ 'tab-active': activeTab === 'test' }" x-on:click="activeTab = 'test'">Test</button>
+		</div>
 		<form
 			class="editor-form"
-			x-data={ "{tpl: " + strconv.FormatBool(rl.Response.Template) + "}" }
 			if isNew {
 				hx-post="/_ui/api/rules"
 			} else {
@@ -426,6 +459,7 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 			hx-target="#editor"
 			hx-swap="outerHTML"
 		>
+			<div class="tab-content" x-show="activeTab === 'request'" x-cloak>
 			<div class="form-section">
 				<label class="field">
 					<span class="field-label">name</span>
@@ -494,8 +528,9 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 					</label>
 				</div>
 			</div>
+			</div>
+			<div class="tab-content" x-show="activeTab === 'response'" x-cloak>
 			<div class="form-section form-section-resp">
-				<div class="form-section-title">response</div>
 				<div class="form-row">
 					<label class="field">
 						<span class="field-label">status</span>
@@ -549,35 +584,8 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 					{ "{{.Method}} {{.Path}} {{.Body}} {{.Header \"X\"}} {{.Query \"k\"}} · now · nowFormat · randomInt · randomString · counter · requestCount" }
 				</div>
 			</div>
-			<div class="editor-actions">
-				<button type="submit" class="btn btn-accent">
-					if isNew {
-						create rule
-					} else {
-						apply changes
-					}
-				</button>
-				if !isNew {
-					<button
-						type="button"
-						class="btn"
-						hx-post="/_ui/api/rules"
-						hx-include="closest form"
-						hx-target="#editor"
-						hx-swap="outerHTML"
-						title="create a copy of this rule from the current form values"
-					>duplicate</button>
-					<button
-						type="button"
-						class="btn btn-danger"
-						hx-delete={ "/_ui/api/rules/" + rl.ID }
-						hx-target="#editor-pane"
-						hx-swap="innerHTML"
-						hx-confirm="Delete this rule?"
-					>delete</button>
-				}
-				<span class="editor-note">changes land in the working copy — <b>save</b> writes to disk</span>
 			</div>
+			<div class="tab-content" x-show="activeTab === 'test'" x-cloak>
 			<div class="form-section test-panel">
 				<div class="form-section-title">test request</div>
 				<div class="form-row">
@@ -610,7 +618,8 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 						class="btn"
 						hx-post="/_ui/api/test-dry"
 						hx-include="closest form"
-						hx-target="next .test-result-slot"
+						hx-target="#test-result-slot"
+						hx-swap="innerHTML"
 						title="evaluate this form's criteria against the test request — nothing is sent"
 					>dry run</button>
 					<button
@@ -618,7 +627,8 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 						class="btn"
 						hx-post="/_ui/api/test-probe"
 						hx-include="closest .test-panel"
-						hx-target="next .test-result-slot"
+						hx-target="#test-result-slot"
+						hx-swap="innerHTML"
 						title="send a real request to the running server (saved rules)"
 					>probe</button>
 					<button
@@ -628,16 +638,46 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 						x-cloak
 						hx-post="/_ui/api/template-preview"
 						hx-include="closest form"
-						hx-target="next .test-result-slot"
+						hx-target="#test-result-slot"
+						hx-swap="innerHTML"
 						title="render the response body template against the test request"
 					>preview template</button>
 				</div>
-				<div class="test-result-slot"></div>
+				<div class="test-result-slot" id="test-result-slot"></div>
+			</div>
+			</div>
+			<div class="editor-actions">
+				<button type="submit" class="btn btn-accent">
+					if isNew {
+						create rule
+					} else {
+						apply changes
+					}
+				</button>
+				if !isNew {
+					<button
+						type="button"
+						class="btn"
+						hx-post="/_ui/api/rules"
+						hx-include="closest form"
+						hx-target="#editor"
+						hx-swap="outerHTML"
+						title="create a copy of this rule from the current form values"
+					>duplicate</button>
+					<button
+						type="button"
+						class="btn btn-danger"
+						hx-delete={ "/_ui/api/rules/" + rl.ID }
+						hx-target="#editor-pane"
+						hx-swap="innerHTML"
+						hx-confirm="Delete this rule?"
+					>delete</button>
+				}
+				<span class="editor-note">changes land in the working copy — <b>save</b> writes to disk</span>
 			</div>
 		</form>
 	</div>
 }
-
 templ KvEditor(prefix string, items map[string]string) {
 	<div class="kv" x-data={ kvInit(prefix, items) }>
 		<template x-for="(item, idx) in items" :key="idx">

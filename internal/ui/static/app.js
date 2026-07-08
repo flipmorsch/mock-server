@@ -37,6 +37,7 @@ function closeEditor() {
 
 document.addEventListener('htmx:afterSwap', (e) => {
   if (e.detail.target.id === 'editor-pane' || e.detail.target.id === 'editor') syncEditingClass();
+  if (window.Alpine) { window.Alpine.initTree(e.detail.target); }
 });
 
 document.addEventListener('click', (e) => {
