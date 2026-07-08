@@ -624,9 +624,9 @@ templ ProbeResultView(result ProbeResult) {
 			</details>
 		}
 		if result.Body != "" {
-			<details>
+			<details open>
 				<summary class="text-gray-600 cursor-pointer hover:text-gray-800">Body</summary>
-				<pre class="mt-2 text-xs font-mono text-gray-700 whitespace-pre-wrap bg-gray-100 p-2 rounded max-h-48 overflow-y-auto">{ result.Body }</pre>
+				@templ.Raw(highlightBody(result.Body))
 			</details>
 		}
 	</div>

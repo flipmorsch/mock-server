@@ -35,6 +35,13 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
   --sidebar-width: 300px;
+
+  --json-key: #0b7285;
+  --json-string: #2b8a3e;
+  --json-number: #c92a2a;
+  --json-bool: #5c7cfa;
+  --json-null: #868e96;
+  --json-punct: #495057;
   --transition: 150ms ease;
 }
 
@@ -708,3 +715,23 @@ kbd {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-placeholder); }
+
+/* JSON syntax highlighting */
+.json-body {
+  margin-top: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  max-height: 300px;
+  overflow-y: auto;
+}
+.json-key   { color: var(--json-key); }
+.json-string { color: var(--json-string); }
+.json-number { color: var(--json-number); }
+.json-bool   { color: var(--json-bool); }
+.json-null   { color: var(--json-null); }
+.json-punct  { color: var(--json-punct); }
