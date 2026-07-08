@@ -325,16 +325,21 @@ func parseFilter(r *http.Request) *rule.RequestFilter {
 }
 
 func decodeProbeRequest(r *http.Request) ProbeRequest {
-	var p ProbeRequest
-	json.NewDecoder(r.Body).Decode(&p)
+	r.ParseForm()
+	p := ProbeRequest{
+		Method:  r.FormValue("probe_method"),
+		Path:    r.FormValue("probe_path"),
+		Headers: make(map[string]string),
+		Body:    r.FormValue("probe_body"),
+	}
 	if p.Method == "" {
 		p.Method = "GET"
 	}
 	if p.Path == "" {
 		p.Path = "/"
 	}
-	if p.Headers == nil {
-		p.Headers = make(map[string]string)
+	if h := r.FormValue("probe_headers"); h != "" {
+		json.Unmarshal([]byte(h), &p.Headers)
 	}
 	return p
 }
