@@ -9,9 +9,13 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"mock-server/internal/rule"
+	"mock-server/internal/server"
+	"mock-server/internal/ui"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 func main() {
 	listenOverride := flag.String("listen", "", "override listen address (e.g., 127.0.0.1:8080)")
@@ -35,12 +39,12 @@ func main() {
 
 	configPath := flag.Arg(0)
 
-	var cfg *Config
+	var cfg *rule.Config
 	var err error
 	if *uiEnabled {
-		cfg, err = loadOrEmpty(configPath)
+		cfg, err = rule.LoadOrEmpty(configPath)
 	} else {
-		cfg, err = LoadConfig(configPath)
+		cfg, err = rule.LoadConfig(configPath)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -52,49 +56,44 @@ func main() {
 		fixDir = "./fixtures"
 	}
 
-	srv := newServer(cfg, configPath, &Journal{}, *uiEnabled, fixDir)
-
-	handler := newHandler(srv)
+	journal := server.NewJournal()
+	srv := server.NewServer(cfg, configPath, journal, *uiEnabled, fixDir)
 
 	addr := srv.ListenAddr()
 	if *listenOverride != "" {
 		addr = *listenOverride
 	}
 
+	h := newHandler(srv)
+
 	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, handler); err != nil {
+	if err := http.ListenAndServe(addr, h); err != nil {
 		fmt.Fprintf(os.Stderr, "server error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func loadOrEmpty(path string) (*Config, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return &Config{}, nil
-	}
-	return LoadConfig(path)
-}
-
 type handler struct {
-	srv *Server
+	srv     *server.Server
+	journal *server.Journal
 }
 
-func newHandler(srv *Server) http.Handler {
-	return &handler{srv: srv}
+func newHandler(srv *server.Server) *handler {
+	return &handler{srv: srv, journal: srv.Journal()}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/_ui/") {
-		if !h.srv.uiEnabled {
+		if !h.srv.UIEnabled() {
 			http.NotFound(w, r)
 			return
 		}
-		uiHandler(h.srv)(w, r)
+		ui.Handler(h.srv, ui.StaticFS)(w, r)
 		return
 	}
 
 	if strings.HasPrefix(r.URL.Path, "/__admin/") {
-		adminHandler(h.srv.journal)(w, r)
+		ui.AdminHandler(h.journal)(w, r)
 		return
 	}
 
@@ -106,26 +105,23 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reqHeaders[http.CanonicalHeaderKey(k)] = r.Header.Get(k)
 	}
 
-	rules := h.srv.Rules()
-	for i := range rules {
-		rule := &rules[i]
-		if match(rule, r, body) {
-			if rule.Response.delayDuration > 0 {
-				time.Sleep(rule.Response.delayDuration)
-			}
-			log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, rule.Response.Status, rule.Name)
-			h.srv.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, rule.Name, rule.Response.Status)
-			writeResponse(w, &rule.Response, r, body, h.srv.journal)
-			return
+	matched, ok := h.srv.MatchRule(r, body)
+	if ok {
+		if matched.Response.DelayDuration > 0 {
+			time.Sleep(matched.Response.DelayDuration)
 		}
+		log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, matched.Response.Status, matched.Name)
+		h.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, matched.Name, matched.Response.Status)
+		writeResponse(w, &matched.Response, r, body, h.journal)
+		return
 	}
 
 	log.Printf("%s %s → 404 (no match)", r.Method, r.URL.Path)
-	h.srv.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, "", 404)
+	h.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, "", 404)
 	http.NotFound(w, r)
 }
 
-func writeResponse(w http.ResponseWriter, resp *Response, r *http.Request, reqBody []byte, journal *Journal) {
+func writeResponse(w http.ResponseWriter, resp *rule.Response, r *http.Request, reqBody []byte, journal *server.Journal) {
 	for k, v := range resp.Headers {
 		w.Header().Set(k, v)
 	}
@@ -139,7 +135,7 @@ func writeResponse(w http.ResponseWriter, resp *Response, r *http.Request, reqBo
 	body := resp.Body
 	if resp.Template {
 		var err error
-		body, err = executeTemplate(resp.Body, r, reqBody, journal)
+		body, err = rule.ExecuteTemplate(resp.Body, r, reqBody, func(f *rule.RequestFilter) int64 { return int64(journal.Count(f)) })
 		if err != nil {
 			log.Printf("template error: %v", err)
 			return

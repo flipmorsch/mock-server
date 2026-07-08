@@ -1,9 +1,12 @@
-package main
+package ui
 
 import (
 	"encoding/json"
 	"strconv"
 	"strings"
+
+	"mock-server/internal/rule"
+	"mock-server/internal/server"
 )
 
 // ---------------------------------------------------------------
@@ -39,7 +42,7 @@ func kvInit(items map[string]string) string {
 	return "kvList({items: [" + strings.Join(pairs, ",") + "]})"
 }
 
-func sidebarInit(rules []Rule) string {
+func sidebarInit(rules []rule.Rule) string {
 	type jRule struct {
 		ID     string `json:"id"`
 		Name   string `json:"name"`
@@ -55,21 +58,21 @@ func sidebarInit(rules []Rule) string {
 	return "sidebarReorder({rules: " + string(b) + "})"
 }
 
-func bodyInit(body *BodyMatch) string {
+func bodyInit(body *rule.BodyMatch) string {
 	if body != nil {
 		return `{enabled: true, mode: "` + jsStr(body.Mode) + `"}`
 	}
 	return `{enabled: false, mode: "exact"}`
 }
 
-func bodyTypeInit(resp *Response) string {
+func bodyTypeInit(resp *rule.Response) string {
 	if resp.BodyFile != "" {
 		return `{bodyType: "file"}`
 	}
 	return `{bodyType: "inline"}`
 }
 
-func bodyVal(body *BodyMatch) string {
+func bodyVal(body *rule.BodyMatch) string {
 	if body != nil {
 		return body.Value
 	}
@@ -80,7 +83,7 @@ func bodyVal(body *BodyMatch) string {
 // TEMPL COMPONENTS
 // ---------------------------------------------------------------
 
-templ Shell(rules []Rule, unsaved bool) {
+templ Shell(rules []rule.Rule, unsaved bool) {
 	<!DOCTYPE html>
 	<html lang="en">
 		<head>
@@ -155,7 +158,7 @@ templ Shell(rules []Rule, unsaved bool) {
 	</html>
 }
 
-templ Sidebar(rules []Rule, unsaved bool) {
+templ Sidebar(rules []rule.Rule, unsaved bool) {
 	<aside class="sidebar">
 		<div class="sidebar-header">
 			<input type="text" class="sidebar-search" placeholder="Filter rules..."
@@ -185,28 +188,28 @@ templ Sidebar(rules []Rule, unsaved bool) {
 		<div class="rule-list" x-data={ sidebarInit(rules) }
 			x-on:dragover.prevent=""
 			x-on:drop="onDrop(parseInt($event.target.closest('.rule-card')?.dataset?.index))">
-			for i, rule := range rules {
+			for i, rl := range rules {
 				<div class="rule-card" draggable="true"
 					x-bind:data-index={ strconv.Itoa(i) }
-					x-on:dragstart={ dragStart(i) }
-					x-on:dragover={ dragOver(i) }
+					x-on:dragstart={ DragStart(i) }
+					x-on:dragover={ DragOver(i) }
 					x-on:dragleave="onDragLeave($event)"
 					x-on:dragend="onDragEnd()"
-					hx-get={ "/_ui/partials/rule-editor/" + rule.ID }
+					hx-get={ "/_ui/partials/rule-editor/" + rl.ID }
 					hx-target="#detail-pane"
 					hx-on--after-request="document.querySelectorAll('.rule-card.active').forEach(c => c.classList.remove('active')); event.target.classList.add('active');">
-					<span class={ "method method-" + rule.Request.Method }>
-						if rule.Request.Method != "" {
-							{ rule.Request.Method }
+					<span class={ "method method-" + rl.Request.Method }>
+						if rl.Request.Method != "" {
+							{ rl.Request.Method }
 						} else {
 							ALL
 						}
 					</span>
 					<div class="info">
-						<div class="path">{ rule.Request.Path }</div>
-						<div class="name">{ rule.Name }</div>
+						<div class="path">{ rl.Request.Path }</div>
+						<div class="name">{ rl.Name }</div>
 					</div>
-					<span class="status">{ strconv.Itoa(rule.Response.Status) }</span>
+					<span class="status">{ strconv.Itoa(rl.Response.Status) }</span>
 				</div>
 			}
 		</div>
@@ -221,12 +224,12 @@ templ StatusBadge(status int) {
 	<span class="status">{ strconv.Itoa(status) }</span>
 }
 
-templ RuleEditor(rule Rule) {
+templ RuleEditor(rl rule.Rule) {
 	<div class="editor" x-data="{ tab: 'request' }">
 		<div class="editor-header">
 			<h2 class="editor-title">
-				if rule.Name != "" {
-					{ rule.Name }
+				if rl.Name != "" {
+					{ rl.Name }
 				} else {
 					New Rule
 				}
@@ -239,13 +242,13 @@ templ RuleEditor(rule Rule) {
 					hx-swap="outerHTML"
 					hx-on--after-request="htmx.ajax('GET', '/_ui/partials/sidebar', 'aside')">Duplicate</button>
 				<button class="btn btn-danger btn-sm"
-					hx-delete={ "/_ui/api/rules/" + rule.ID }
+					hx-delete={ "/_ui/api/rules/" + rl.ID }
 					hx-confirm="Delete this rule?"
 					hx-target="#detail-pane"
 					hx-swap="innerHTML"
 					hx-on--after-request="htmx.ajax('GET', '/_ui/partials/sidebar', 'aside'); htmx.ajax('GET', '/_ui/partials/new-rule', '#detail-pane')">Delete</button>
 				<button class="btn btn-primary"
-					hx-put={ "/_ui/api/rules/" + rule.ID }
+					hx-put={ "/_ui/api/rules/" + rl.ID }
 					hx-include="closest form"
 					hx-swap="none"
 					hx-on--after-request="htmx.ajax('GET', '/_ui/partials/sidebar', 'aside'); showToast('Rule saved', 'success')">Save Rule</button>
@@ -258,35 +261,35 @@ templ RuleEditor(rule Rule) {
 			<button class="tab" :class="tab === 'test' ? 'active' : ''" x-on:click="tab = 'test'">Test</button>
 		</div>
 
-		<form id={ "rule-form-" + rule.ID }>
-			<input type="hidden" name="id" value={ rule.ID }/>
+		<form id={ "rule-form-" + rl.ID }>
+			<input type="hidden" name="id" value={ rl.ID }/>
 
 			<div x-show="tab === 'request'">
-				@RequestForm(rule)
+				@RequestForm(rl)
 			</div>
 			<div x-show="tab === 'response'">
-				@ResponseForm(rule)
+				@ResponseForm(rl)
 			</div>
 			<div x-show="tab === 'test'">
-				@TestPanel(rule)
+				@TestPanel(rl)
 			</div>
 		</form>
 	</div>
 }
 
-templ RequestForm(rule Rule) {
+templ RequestForm(rl rule.Rule) {
 	<div class="form-section">
 		<div class="form-section-title">General</div>
 		<div class="form-group">
 			<label>Name</label>
-			<input type="text" name="name" value={ rule.Name } placeholder="e.g. Get Users"/>
+			<input type="text" name="name" value={ rl.Name } placeholder="e.g. Get Users"/>
 		</div>
 		<div class="form-row">
 			<div class="form-group">
 				<label>Method</label>
 				<select name="method">
 					for _, m := range []string{"", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
-						if m == rule.Request.Method {
+						if m == rl.Request.Method {
 							<option value={ m } selected="selected">{ m }</option>
 						} else {
 							<option value={ m }>{ m }</option>
@@ -296,13 +299,13 @@ templ RequestForm(rule Rule) {
 			</div>
 			<div class="form-group">
 				<label>Path</label>
-				<input type="text" name="path" value={ rule.Request.Path } placeholder="/api/users" class="mono"/>
+				<input type="text" name="path" value={ rl.Request.Path } placeholder="/api/users" class="mono"/>
 			</div>
 			<div class="form-group">
 				<label>Path Mode</label>
 				<select name="path_mode">
 					for _, pm := range []string{"exact", "prefix", "regex"} {
-						if pm == rule.Request.PathMode {
+						if pm == rl.Request.PathMode {
 							<option value={ pm } selected="selected">{ pm }</option>
 						} else {
 							<option value={ pm }>{ pm }</option>
@@ -313,13 +316,12 @@ templ RequestForm(rule Rule) {
 		</div>
 	</div>
 
-	@KvSection("Request Headers", "req_hdr", rule.Request.Headers)
-	@KvSection("Query Parameters", "req_query", rule.Request.Query)
-	@BodyMatchSection(rule.Request.Body)
+	@KvSection("Request Headers", "req_hdr", rl.Request.Headers)
+	@KvSection("Query Parameters", "req_query", rl.Request.Query)
+	@BodyMatchSection(rl.Request.Body)
 }
 
-
-templ BodyMatchSection(body *BodyMatch) {
+templ BodyMatchSection(body *rule.BodyMatch) {
 	<div class="form-section" x-data={ bodyInit(body) }>
 		<div class="form-section-title">Body Match</div>
 		<label class="checkbox-label">
@@ -344,8 +346,8 @@ templ BodyMatchSection(body *BodyMatch) {
 	</div>
 }
 
-templ TestPanel(rule Rule) {
-	<div class="test-panel" x-data={ testInit(rule.Request.Path) }>
+templ TestPanel(rl rule.Rule) {
+	<div class="test-panel" x-data={ TestInit(rl.Request.Path) }>
 		<div class="test-panel-header">Test Request</div>
 		<div class="test-panel-body">
 			<div class="form-row form-row-4">
@@ -363,11 +365,11 @@ templ TestPanel(rule Rule) {
 				</div>
 				<div class="form-group" style="display:flex; align-items:flex-end; gap:4px">
 					<button type="button" class="btn btn-secondary btn-sm"
-						hx-post={ "/_ui/api/rules/" + rule.ID + "/test-dry" }
+						hx-post={ "/_ui/api/rules/" + rl.ID + "/test-dry" }
 						hx-include="closest .test-panel-body"
 						hx-target="next .test-result">Dry Run</button>
 					<button type="button" class="btn btn-primary btn-sm"
-						hx-post={ "/_ui/api/rules/" + rule.ID + "/test-probe" }
+						hx-post={ "/_ui/api/rules/" + rl.ID + "/test-probe" }
 						hx-include="closest .test-panel-body"
 						hx-target="next .test-result">Probe</button>
 				</div>
@@ -444,7 +446,7 @@ templ EmptyRuleEditor() {
 	</div>
 }
 
-templ JournalPanel(entries []JournalEntry) {
+templ JournalPanel(entries []server.JournalEntry) {
 	if len(entries) == 0 {
 		<div class="journal">
 			<div class="journal-header"><span class="journal-title">Request Journal</span></div>
@@ -490,26 +492,27 @@ templ JournalPanel(entries []JournalEntry) {
 		</div>
 	}
 }
-templ ResponseForm(rule Rule) {
+
+templ ResponseForm(rl rule.Rule) {
 	<div class="form-section">
 		<div class="form-section-title">Response</div>
 		<div class="form-row form-row-2">
 			<div class="form-group">
 				<label>Status Code</label>
-				<input type="number" name="status" value={ formatStatus(rule.Response.Status) } min="100" max="599"/>
+				<input type="number" name="status" value={ FormatStatus(rl.Response.Status) } min="100" max="599"/>
 			</div>
 			<div class="form-group">
 				<label>Delay</label>
-				<input type="text" name="delay" value={ rule.Response.Delay } placeholder="e.g. 500ms, 2s" class="mono"/>
+				<input type="text" name="delay" value={ rl.Response.Delay } placeholder="e.g. 500ms, 2s" class="mono"/>
 			</div>
 		</div>
 	</div>
 
-	@KvSection("Response Headers", "resp_hdr", rule.Response.Headers)
+	@KvSection("Response Headers", "resp_hdr", rl.Response.Headers)
 
 	<div class="form-section">
 		<div class="form-section-title">Body</div>
-		<div x-data={ bodyTypeInit(&rule.Response) }>
+		<div x-data={ bodyTypeInit(&rl.Response) }>
 			<div class="toggle" style="margin-bottom: 12px">
 				<button type="button" :class="bodyType === 'inline' ? 'active' : ''" x-on:click="bodyType = 'inline'">Inline</button>
 				<button type="button" :class="bodyType === 'file' ? 'active' : ''" x-on:click="bodyType = 'file'">File</button>
@@ -517,7 +520,7 @@ templ ResponseForm(rule Rule) {
 
 			<div x-show="bodyType === 'inline'">
 				<div class="form-group">
-					<textarea name="body" rows="8" class="mono">{ rule.Response.Body }</textarea>
+					<textarea name="body" rows="8" class="mono">{ rl.Response.Body }</textarea>
 				</div>
 			</div>
 
@@ -525,20 +528,21 @@ templ ResponseForm(rule Rule) {
 				<div class="form-group">
 					<input type="file" name="body_file_upload" class="file-upload"/>
 				</div>
-				if rule.Response.BodyFile != "" {
-					<div class="mono" style="font-size:12px; color: var(--text-muted);">{ rule.Response.BodyFile }</div>
+				if rl.Response.BodyFile != "" {
+					<div class="mono" style="font-size:12px; color: var(--text-muted);">{ rl.Response.BodyFile }</div>
 				}
-				<input type="hidden" name="body_file" value={ rule.Response.BodyFile }/>
+				<input type="hidden" name="body_file" value={ rl.Response.BodyFile }/>
 			</div>
 
 			<label class="checkbox-label" style="margin-top: 12px">
 				<input type="checkbox" name="template"
-					if rule.Response.Template { checked="checked" }/>
+					if rl.Response.Template { checked="checked" }/>
 				Template (use <code>{`{{.Method}}`}</code>, <code>{`{{.Path}}`}</code>, etc.)
 			</label>
 		</div>
 	</div>
 }
+
 templ KvSection(title string, prefix string, items map[string]string) {
 	<div class="form-section">
 		<div class="form-section-title">{ title }</div>
@@ -559,8 +563,7 @@ templ KvSection(title string, prefix string, items map[string]string) {
 	</div>
 }
 
-
-templ SettingsPanel(cfg Config) {
+templ SettingsPanel(cfg rule.Config) {
 	<div class="max-w-md space-y-4">
 		<h2 class="text-lg font-semibold text-gray-800">Server Settings</h2>
 		<div>
@@ -603,7 +606,7 @@ templ DryRunResult(matched bool) {
 	</div>
 }
 
-templ ProbeResult(result probeResult) {
+templ ProbeResultView(result ProbeResult) {
 	<div class="mt-3 p-3 border rounded bg-gray-50 space-y-3 text-sm">
 		<div>
 			<span class="font-medium text-gray-700">Status:</span>

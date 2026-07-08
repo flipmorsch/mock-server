@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	. "mock-server/internal/rule"
+	. "mock-server/internal/server"
 )
 
 func TestServerMatchedRule(t *testing.T) {
@@ -24,7 +27,7 @@ func TestServerMatchedRule(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/hello", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -51,7 +54,7 @@ func TestServerNoMatch(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/nope", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -82,7 +85,7 @@ func TestServerResponseHeaders(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/data", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -112,7 +115,7 @@ func TestServerDefaultContentType(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/plain", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -152,7 +155,7 @@ func TestServerPreservesStatusCode(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	tests := []struct {
 		method string
@@ -177,7 +180,7 @@ func TestServerPreservesStatusCode(t *testing.T) {
 
 func TestServerEmptyConfig(t *testing.T) {
 	cfg := &Config{}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req := httptest.NewRequest("GET", "/anything", nil)
 	w := httptest.NewRecorder()
@@ -188,7 +191,7 @@ func TestServerEmptyConfig(t *testing.T) {
 	}
 }
 
-func TestServerMethodMismatch(t *testing.T) {
+func TestServerMethodMisMatch(t *testing.T) {
 	cfg := &Config{
 		Rules: []Rule{
 			{
@@ -202,7 +205,7 @@ func TestServerMethodMismatch(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req := httptest.NewRequest("POST", "/resource", nil)
 	w := httptest.NewRecorder()
@@ -225,13 +228,13 @@ func TestServerDelay(t *testing.T) {
 				Response: Response{
 					Status:        200,
 					Body:          "delayed",
-					delayDuration: 50 * time.Millisecond,
+					DelayDuration: 50 * time.Millisecond,
 				},
 			},
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/slow", nil)
 	w := httptest.NewRecorder()
 
@@ -268,7 +271,7 @@ func TestServerTemplateMethodAndPath(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/echo?foo=bar", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -296,7 +299,7 @@ func TestServerTemplateBodyEcho(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("POST", "/echo", strings.NewReader(`{"key":"val"}`))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -324,7 +327,7 @@ func TestServerTemplateHeaderAndQuery(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/info?page=3", nil)
 	req.Header.Set("X-Test", "hello")
 	w := httptest.NewRecorder()
@@ -353,7 +356,7 @@ func TestServerTemplateFunctions(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req1 := httptest.NewRequest("GET", "/funcs", nil)
 	w1 := httptest.NewRecorder()
@@ -400,7 +403,7 @@ func TestServerTemplateNoTemplateFlag(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/literal", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -428,7 +431,7 @@ func TestServerTemplateParseError(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/bad", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -459,7 +462,7 @@ func TestServerTemplateWithBodyFile(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/tplfile", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -481,14 +484,14 @@ func TestServerDelayAndTemplate(t *testing.T) {
 				Response: Response{
 					Status:        200,
 					Template:      true,
-					delayDuration: 10 * time.Millisecond,
+					DelayDuration: 10 * time.Millisecond,
 					Body:          "{{.Method}}",
 				},
 			},
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 	req := httptest.NewRequest("GET", "/slowtpl", nil)
 	w := httptest.NewRecorder()
 
@@ -519,7 +522,7 @@ func TestServerNoMatchWithBody(t *testing.T) {
 		},
 	}
 
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req := httptest.NewRequest("POST", "/submit", strings.NewReader("wrong body"))
 	w := httptest.NewRecorder()
@@ -532,7 +535,7 @@ func TestServerNoMatchWithBody(t *testing.T) {
 
 func TestAdminRequestsEmpty(t *testing.T) {
 	cfg := &Config{Rules: []Rule{}}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req := httptest.NewRequest("GET", "/__admin/requests", nil)
 	w := httptest.NewRecorder()
@@ -556,7 +559,7 @@ func TestAdminRequestsWithEntries(t *testing.T) {
 			},
 		},
 	}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req := httptest.NewRequest("GET", "/hello?x=1", nil)
 	req.Header.Set("X-Test", "val")
@@ -584,7 +587,7 @@ func TestAdminRequestsWithEntries(t *testing.T) {
 
 func TestAdminRequestsUnmatched(t *testing.T) {
 	cfg := &Config{Rules: []Rule{}}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req := httptest.NewRequest("GET", "/nope", nil)
 	w := httptest.NewRecorder()
@@ -610,7 +613,7 @@ func TestAdminRequestsCount(t *testing.T) {
 			{Name: "b", Request: Request{Method: "POST", Path: "/b"}, Response: Response{Status: 201}},
 		},
 	}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/a", nil))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/b", nil))
@@ -631,7 +634,7 @@ func TestAdminRequestsClear(t *testing.T) {
 			{Name: "a", Request: Request{Method: "GET", Path: "/a"}, Response: Response{Status: 200}},
 		},
 	}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/a", nil))
 
@@ -658,7 +661,7 @@ func TestAdminRequestsFilterByPathMode(t *testing.T) {
 			{Name: "users", Request: Request{Method: "GET", Path: "/users", PathMode: "exact"}, Response: Response{Status: 200}},
 		},
 	}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/users", nil))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/users/42", nil))
@@ -684,7 +687,7 @@ func TestAdminRequestsFilterByHeader(t *testing.T) {
 			{Name: "test", Request: Request{Method: "POST", Path: "/submit"}, Response: Response{Status: 200}},
 		},
 	}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req1 := httptest.NewRequest("POST", "/submit", nil)
 	req1.Header.Set("Content-Type", "application/json")
@@ -709,7 +712,7 @@ func TestAdminRequestsBodyFilter(t *testing.T) {
 			{Name: "test", Request: Request{Method: "POST", Path: "/submit"}, Response: Response{Status: 200}},
 		},
 	}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req1 := httptest.NewRequest("POST", "/submit", strings.NewReader(`{"key":"val"}`))
 	h.ServeHTTP(httptest.NewRecorder(), req1)
@@ -728,7 +731,7 @@ func TestAdminRequestsBodyFilter(t *testing.T) {
 
 func TestAdminRequestsUnknownPath(t *testing.T) {
 	cfg := &Config{Rules: []Rule{}}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	req := httptest.NewRequest("GET", "/__admin/unknown", nil)
 	w := httptest.NewRecorder()
@@ -753,7 +756,7 @@ func TestServerTemplateRequestCount(t *testing.T) {
 			},
 		},
 	}
-	h := newHandler(newServer(cfg, "", &Journal{}, false, ""))
+	h := newHandler(NewServer(cfg, "", NewJournal(), false, ""))
 
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/other", nil))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/count", nil))

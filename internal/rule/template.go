@@ -1,7 +1,7 @@
-package main
+package rule
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -11,22 +11,7 @@ import (
 
 var globalCounter atomic.Int64
 
-type templateData struct {
-	Method string
-	Path   string
-	Body   string
-	req    *http.Request
-}
-
-func (d templateData) Header(name string) string {
-	return d.req.Header.Get(name)
-}
-
-func (d templateData) Query(name string) string {
-	return d.req.URL.Query().Get(name)
-}
-
-func templateFuncs(journal *Journal) template.FuncMap {
+func templateFuncs(counter func(*RequestFilter) int64) template.FuncMap {
 	return template.FuncMap{
 		"now": func() string {
 			return time.Now().Format(time.RFC3339)
@@ -35,14 +20,14 @@ func templateFuncs(journal *Journal) template.FuncMap {
 			return time.Now().Format(layout)
 		},
 		"randomInt": func(min, max int) int {
-			return rand.Intn(max-min+1) + min
+			return rand.IntN(max-min+1) + min
 		},
 		"randomString": func(n int) string {
 			const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 			var sb strings.Builder
 			sb.Grow(n)
 			for i := 0; i < n; i++ {
-				sb.WriteByte(letters[rand.Intn(len(letters))])
+				sb.WriteByte(letters[rand.IntN(len(letters))])
 			}
 			return sb.String()
 		},
@@ -57,18 +42,18 @@ func templateFuncs(journal *Journal) template.FuncMap {
 			if len(args) >= 2 {
 				f.Path = args[1]
 			}
-			return int64(journal.Count(f))
+			return counter(f)
 		},
 	}
 }
 
-func executeTemplate(body string, r *http.Request, reqBody []byte, journal *Journal) (string, error) {
-	tmpl, err := template.New("response").Funcs(templateFuncs(journal)).Parse(body)
+func ExecuteTemplate(body string, r *http.Request, reqBody []byte, counter func(*RequestFilter) int64) (string, error) {
+	tmpl, err := template.New("response").Funcs(templateFuncs(counter)).Parse(body)
 	if err != nil {
 		return "", err
 	}
 
-	data := templateData{
+	data := &templateData{
 		Method: r.Method,
 		Path:   r.URL.Path,
 		Body:   string(reqBody),
@@ -81,4 +66,3 @@ func executeTemplate(body string, r *http.Request, reqBody []byte, journal *Jour
 	}
 	return sb.String(), nil
 }
-

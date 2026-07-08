@@ -1,4 +1,4 @@
-package main
+package rule
 
 import (
 	"net/http"
@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-func match(rule *Rule, r *http.Request, body []byte) bool {
-	if normalizeMethod(rule.Request.Method) != normalizeMethod(r.Method) {
+func Match(rule *Rule, r *http.Request, body []byte) bool {
+	if NormalizeMethod(rule.Request.Method) != NormalizeMethod(r.Method) {
 		return false
 	}
 

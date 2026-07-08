@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"crypto/rand"
@@ -9,11 +9,13 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"mock-server/internal/rule"
 )
 
 type Server struct {
-	config      *Config
-	workingCopy *Config
+	config      *rule.Config
+	workingCopy *rule.Config
 	configPath  string
 	fixturesDir string
 	journal     *Journal
@@ -22,7 +24,7 @@ type Server struct {
 	mu          sync.RWMutex
 }
 
-func newServer(cfg *Config, configPath string, journal *Journal, uiEnabled bool, fixturesDir string) *Server {
+func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled bool, fixturesDir string) *Server {
 	return &Server{
 		config:      cfg,
 		workingCopy: cloneConfig(cfg),
@@ -33,7 +35,7 @@ func newServer(cfg *Config, configPath string, journal *Journal, uiEnabled bool,
 	}
 }
 
-func newUUID() string {
+func NewUUID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	b[6] = (b[6] & 0x0f) | 0x40
@@ -41,24 +43,24 @@ func newUUID() string {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-func cloneConfig(cfg *Config) *Config {
+func cloneConfig(cfg *rule.Config) *rule.Config {
 	if cfg == nil {
-		return &Config{}
+		return &rule.Config{}
 	}
-	rules := make([]Rule, len(cfg.Rules))
+	rules := make([]rule.Rule, len(cfg.Rules))
 	for i, r := range cfg.Rules {
 		rules[i] = cloneRule(r)
 		if rules[i].ID == "" {
-			rules[i].ID = newUUID()
+			rules[i].ID = NewUUID()
 		}
 	}
-	return &Config{
+	return &rule.Config{
 		Listen: cfg.Listen,
 		Rules:  rules,
 	}
 }
 
-func cloneRule(r Rule) Rule {
+func cloneRule(r rule.Rule) rule.Rule {
 	headers := make(map[string]string)
 	for k, v := range r.Request.Headers {
 		headers[k] = v
@@ -72,39 +74,39 @@ func cloneRule(r Rule) Rule {
 		respHeaders[k] = v
 	}
 
-	clone := Rule{
+	clone := rule.Rule{
 		ID:   r.ID,
 		Name: r.Name,
-		Request: Request{
+		Request: rule.Request{
 			Method:   r.Request.Method,
 			Path:     r.Request.Path,
 			PathMode: r.Request.PathMode,
 			Headers:  headers,
 			Query:    query,
 		},
-		Response: Response{
+		Response: rule.Response{
 			Status:        r.Response.Status,
 			Headers:       respHeaders,
 			Body:          r.Response.Body,
 			BodyFile:      r.Response.BodyFile,
 			Delay:         r.Response.Delay,
 			Template:      r.Response.Template,
-			delayDuration: r.Response.delayDuration,
+			DelayDuration: r.Response.DelayDuration,
 		},
 	}
 	if r.Request.Body != nil {
-		clone.Request.Body = &BodyMatch{Mode: r.Request.Body.Mode, Value: r.Request.Body.Value}
+		clone.Request.Body = &rule.BodyMatch{Mode: r.Request.Body.Mode, Value: r.Request.Body.Value}
 	}
 	return clone
 }
 
-func (s *Server) Rules() []Rule {
+func (s *Server) Rules() []rule.Rule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.config.Rules
 }
 
-func (s *Server) WorkingCopy() []Rule {
+func (s *Server) WorkingCopy() []rule.Rule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.workingCopy.Rules
@@ -113,10 +115,10 @@ func (s *Server) WorkingCopy() []Rule {
 func (s *Server) ListenAddr() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.config.listenAddr()
+	return s.config.ListenAddr()
 }
 
-func (s *Server) FindRule(id string) *Rule {
+func (s *Server) FindRule(id string) *rule.Rule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := range s.workingCopy.Rules {
@@ -127,16 +129,16 @@ func (s *Server) FindRule(id string) *Rule {
 	return nil
 }
 
-func (s *Server) CreateRule(rule Rule) Rule {
+func (s *Server) CreateRule(r rule.Rule) rule.Rule {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rule.ID = newUUID()
-	s.workingCopy.Rules = append(s.workingCopy.Rules, rule)
+	r.ID = NewUUID()
+	s.workingCopy.Rules = append(s.workingCopy.Rules, r)
 	s.unsaved = true
-	return rule
+	return r
 }
 
-func (s *Server) UpdateRule(id string, updated Rule) (*Rule, bool) {
+func (s *Server) UpdateRule(id string, updated rule.Rule) (*rule.Rule, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.workingCopy.Rules {
@@ -169,11 +171,11 @@ func (s *Server) ReorderRules(ids []string) bool {
 	if len(ids) != len(s.workingCopy.Rules) {
 		return false
 	}
-	lookup := make(map[string]Rule)
+	lookup := make(map[string]rule.Rule)
 	for _, r := range s.workingCopy.Rules {
 		lookup[r.ID] = r
 	}
-	ordered := make([]Rule, 0, len(ids))
+	ordered := make([]rule.Rule, 0, len(ids))
 	for _, id := range ids {
 		r, ok := lookup[id]
 		if !ok {
@@ -193,7 +195,7 @@ func (s *Server) UpdateConfig(listen string) {
 	s.unsaved = true
 }
 
-func (s *Server) GetConfig() Config {
+func (s *Server) GetConfig() rule.Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return *s.workingCopy
@@ -227,11 +229,18 @@ func (s *Server) ResolveFixturePath(filename string) string {
 	return filepath.Join(s.fixturesDir, filepath.Base(filename))
 }
 
-func (s *Server) matchRule(r *http.Request, body []byte) (*Rule, bool) {
+func (s *Server) Journal() *Journal {
+	return s.journal
+}
+func (s *Server) UIEnabled() bool {
+	return s.uiEnabled
+}
+
+func (s *Server) MatchRule(r *http.Request, body []byte) (*rule.Rule, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := range s.config.Rules {
-		if match(&s.config.Rules[i], r, body) {
+		if rule.Match(&s.config.Rules[i], r, body) {
 			return &s.config.Rules[i], true
 		}
 	}

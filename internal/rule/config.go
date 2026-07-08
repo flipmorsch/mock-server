@@ -1,4 +1,4 @@
-package main
+package rule
 
 import (
 	"fmt"
@@ -16,37 +16,6 @@ type Config struct {
 	Rules  []Rule `yaml:"rules"`
 }
 
-type Rule struct {
-	ID       string   `yaml:"id"`
-	Name     string   `yaml:"name"`
-	Request  Request  `yaml:"request"`
-	Response Response `yaml:"response"`
-}
-
-type Request struct {
-	Method   string            `yaml:"method"`
-	Path     string            `yaml:"path"`
-	PathMode string            `yaml:"path_mode"`
-	Headers  map[string]string `yaml:"headers"`
-	Query    map[string]string `yaml:"query"`
-	Body     *BodyMatch        `yaml:"body"`
-}
-
-type BodyMatch struct {
-	Mode  string `yaml:"mode"`
-	Value string `yaml:"value"`
-}
-
-type Response struct {
-	Status        int               `yaml:"status"`
-	Headers       map[string]string `yaml:"headers"`
-	Body          string            `yaml:"body"`
-	BodyFile      string            `yaml:"body_file"`
-	Delay         string            `yaml:"delay"`
-	Template      bool              `yaml:"template"`
-	delayDuration time.Duration
-}
-
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -58,14 +27,21 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	if err := cfg.validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
 	return &cfg, nil
 }
 
-func (c *Config) validate() error {
+func LoadOrEmpty(path string) (*Config, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return &Config{}, nil
+	}
+	return LoadConfig(path)
+}
+
+func (c *Config) Validate() error {
 	for i, rule := range c.Rules {
 		if rule.Request.Method == "" {
 			return fmt.Errorf("rule %d (%q): method is required", i+1, rule.Name)
@@ -126,7 +102,7 @@ func (c *Config) validate() error {
 			if err != nil {
 				return fmt.Errorf("rule %d (%q): invalid delay %q: %w", i+1, rule.Name, rule.Response.Delay, err)
 			}
-			rule.Response.delayDuration = d
+			rule.Response.DelayDuration = d
 		}
 		rule.Response.BodyFile = ""
 		c.Rules[i] = rule
@@ -135,13 +111,13 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func (c *Config) listenAddr() string {
+func (c *Config) ListenAddr() string {
 	if c.Listen != "" {
 		return c.Listen
 	}
 	return "127.0.0.1:8080"
 }
 
-func normalizeMethod(m string) string {
+func NormalizeMethod(m string) string {
 	return strings.ToUpper(strings.TrimSpace(m))
 }

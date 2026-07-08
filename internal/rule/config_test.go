@@ -1,9 +1,11 @@
-package main
+package rule_test
 
 import (
 	"os"
 	"testing"
 	"time"
+
+	. "mock-server/internal/rule"
 )
 
 func TestLoadConfigValid(t *testing.T) {
@@ -85,7 +87,7 @@ rules:
 	if cfg.Listen != "" {
 		t.Errorf("listen = %q, want empty", cfg.Listen)
 	}
-	if addr := cfg.listenAddr(); addr != "127.0.0.1:8080" {
+	if addr := cfg.ListenAddr(); addr != "127.0.0.1:8080" {
 		t.Errorf("listenAddr = %q, want 127.0.0.1:8080", addr)
 	}
 	if len(cfg.Rules) != 1 {
@@ -371,8 +373,8 @@ rules:
 	if cfg.Rules[0].Response.Delay != "500ms" {
 		t.Errorf("delay = %q, want 500ms", cfg.Rules[0].Response.Delay)
 	}
-	if cfg.Rules[0].Response.delayDuration != 500*time.Millisecond {
-		t.Errorf("delayDuration = %v, want 500ms", cfg.Rules[0].Response.delayDuration)
+	if cfg.Rules[0].Response.DelayDuration != 500*time.Millisecond {
+		t.Errorf("delayDuration = %v, want 500ms", cfg.Rules[0].Response.DelayDuration)
 	}
 }
 
@@ -408,14 +410,14 @@ func TestLoadConfigMalformedYaml(t *testing.T) {
 
 func TestListenAddrDefault(t *testing.T) {
 	cfg := &Config{}
-	if addr := cfg.listenAddr(); addr != "127.0.0.1:8080" {
+	if addr := cfg.ListenAddr(); addr != "127.0.0.1:8080" {
 		t.Errorf("default listenAddr = %q, want 127.0.0.1:8080", addr)
 	}
 }
 
 func TestListenAddrCustom(t *testing.T) {
 	cfg := &Config{Listen: "0.0.0.0:3000"}
-	if addr := cfg.listenAddr(); addr != "0.0.0.0:3000" {
+	if addr := cfg.ListenAddr(); addr != "0.0.0.0:3000" {
 		t.Errorf("custom listenAddr = %q, want 0.0.0.0:3000", addr)
 	}
 }
