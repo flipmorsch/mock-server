@@ -100,11 +100,6 @@ func cloneRule(r rule.Rule) rule.Rule {
 	return clone
 }
 
-func (s *Server) Rules() []rule.Rule {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.config.Rules
-}
 
 func (s *Server) WorkingCopy() []rule.Rule {
 	s.mu.RLock()

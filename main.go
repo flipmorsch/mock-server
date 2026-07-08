@@ -64,7 +64,7 @@ func main() {
 		addr = *listenOverride
 	}
 
-	h := newHandler(srv)
+	h := &handler{srv: srv}
 
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, h); err != nil {
@@ -74,13 +74,9 @@ func main() {
 }
 
 type handler struct {
-	srv     *server.Server
-	journal *server.Journal
+	srv *server.Server
 }
 
-func newHandler(srv *server.Server) *handler {
-	return &handler{srv: srv, journal: srv.Journal()}
-}
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/_ui/") {
@@ -93,10 +89,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasPrefix(r.URL.Path, "/__admin/") {
-		ui.AdminHandler(h.journal)(w, r)
+		ui.AdminHandler(h.srv.Journal())(w, r)
 		return
 	}
-
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
 
@@ -111,13 +106,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(matched.Response.DelayDuration)
 		}
 		log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, matched.Response.Status, matched.Name)
-		h.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, matched.Name, matched.Response.Status)
-		writeResponse(w, &matched.Response, r, body, h.journal)
+		h.srv.Journal().Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, matched.Name, matched.Response.Status)
+		writeResponse(w, &matched.Response, r, body, h.srv.Journal())
 		return
 	}
 
 	log.Printf("%s %s → 404 (no match)", r.Method, r.URL.Path)
-	h.journal.Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, "", 404)
+	h.srv.Journal().Record(r.Method, r.URL.Path, r.URL.RawQuery, reqHeaders, body, "", 404)
 	http.NotFound(w, r)
 }
 

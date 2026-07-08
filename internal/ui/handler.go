@@ -33,17 +33,9 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 	staticHandler := http.FileServerFS(staticFS)
 	mux.Handle("GET /_ui/static/", http.StripPrefix("/_ui/", staticHandler))
 
-	mux.HandleFunc("GET /_ui/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/_ui/" && !strings.HasPrefix(r.URL.Path, "/_ui/static/") && !strings.HasPrefix(r.URL.Path, "/_ui/api/") && !strings.HasPrefix(r.URL.Path, "/_ui/partials/") {
-			http.NotFound(w, r)
-			return
-		}
-		if r.URL.Path == "/_ui/" || r.URL.Path == "/_ui" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			ShellPage(srv, w)
-			return
-		}
-		http.NotFound(w, r)
+	mux.HandleFunc("GET /_ui/{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		ShellPage(srv, w)
 	})
 
 	mux.HandleFunc("GET /_ui/api/rules", func(w http.ResponseWriter, r *http.Request) {

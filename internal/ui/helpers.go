@@ -1,6 +1,9 @@
 package ui
 
-import "strconv"
+import (
+	"encoding/json"
+	"strconv"
+)
 
 func FormatStatus(status int) string {
 	if status == 0 {
@@ -10,7 +13,8 @@ func FormatStatus(status int) string {
 }
 
 func TestInit(path string) string {
-	return `{ method: 'GET', path: '` + path + `', headers: '', body: '' }`
+	b, _ := json.Marshal(map[string]string{"method": "GET", "path": path, "headers": "", "body": ""})
+	return string(b)
 }
 
 func DragStart(idx int) string { return "onDragStart(" + strconv.Itoa(idx) + ", $event)" }
