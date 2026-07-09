@@ -17,6 +17,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/flipmorsch/mock-server/internal/rule"
@@ -42,13 +45,22 @@ type Request struct {
 	ResponseBody string // body the mock returned
 }
 
-// Match selects received requests. Empty fields match anything. JSONBody, when
-// set, requires the request body to contain it as a JSON subset (object fields
-// partial, arrays element-wise, scalars equal).
+// Match selects received requests. Empty fields match anything.
+//
+// JSONBody, when set, requires the request body to contain it as a JSON subset
+// (object fields partial, arrays element-wise, scalars equal). Query and Headers
+// require each given key to be present on the request; a non-empty value must match
+// exactly, an empty value asserts presence only.
+//
+// The sensitive headers redacted in the journal (Authorization, Cookie, X-Api-Key,
+// …) are stored as "[REDACTED]", so a header Match on them can only assert presence
+// (empty value), never their real value.
 type Match struct {
 	Method   string
 	Path     string
 	JSONBody string
+	Query    map[string]string
+	Headers  map[string]string
 }
 
 // Start launches a mock on a random loopback port, serving rules parsed from the
@@ -132,15 +144,49 @@ func (s *Server) VerifyCalled(method, path string) error {
 	return nil
 }
 
-// CountMatch returns how many received requests satisfy m (including its JSON
-// body subset, if set). Body-filtered counts are scoped to the retained window.
+// CountMatch returns how many received requests satisfy m. A method/path-only
+// Match uses monotonic tallies and stays sound regardless of the retained window;
+// once Query, Headers, or JSONBody is set the count is scoped to that window.
 func (s *Server) CountMatch(m Match) int {
-	f := &rule.RequestFilter{Method: m.Method, Path: m.Path}
-	if m.JSONBody != "" {
-		f.Body = m.JSONBody
-		f.BodyMode = "json"
+	base := &rule.RequestFilter{Method: m.Method, Path: m.Path}
+	if m.JSONBody == "" && len(m.Query) == 0 && len(m.Headers) == 0 {
+		return s.journal.Count(base)
 	}
-	return s.journal.Count(f)
+	n := 0
+	for _, e := range s.journal.Entries(base) {
+		if m.extraMatch(&e) {
+			n++
+		}
+	}
+	return n
+}
+
+// extraMatch applies the dimensions the coarse method/path filter can't: JSON body
+// subset, query params, and headers.
+//
+// ponytail: header/query matching lives here, not in rule.requestFilterMatch, so the
+// frozen /__admin/ filter semantics stay put — here an empty value means "present
+// with any value", which is how a redacted sensitive header is asserted.
+func (m Match) extraMatch(e *server.JournalEntry) bool {
+	if m.JSONBody != "" && !rule.JSONBodyMatches(m.JSONBody, e.Body) {
+		return false
+	}
+	if len(m.Query) > 0 {
+		q, _ := url.ParseQuery(e.Query)
+		for k, v := range m.Query {
+			vals, ok := q[k]
+			if !ok || (v != "" && !slices.Contains(vals, v)) {
+				return false
+			}
+		}
+	}
+	for k, v := range m.Headers {
+		hv, ok := e.Headers[http.CanonicalHeaderKey(k)]
+		if !ok || (v != "" && hv != v) {
+			return false
+		}
+	}
+	return true
 }
 
 // VerifyMatch asserts the mock received exactly n requests satisfying m. On
@@ -173,10 +219,35 @@ func (s *Server) VerifyAtMost(m Match, n int) error {
 
 func (m Match) String() string {
 	s := orAny(m.Method) + " " + orAny(m.Path)
+	if len(m.Query) > 0 {
+		s += " ?" + kvString(m.Query)
+	}
+	if len(m.Headers) > 0 {
+		s += " H{" + kvString(m.Headers) + "}"
+	}
 	if m.JSONBody != "" {
 		s += " body⊇" + m.JSONBody
 	}
 	return s
+}
+
+// kvString renders a filter map deterministically: "k=v" pairs, or bare "k" for a
+// presence-only (empty value) entry, sorted by key.
+func kvString(kv map[string]string) string {
+	keys := make([]string, 0, len(kv))
+	for k := range kv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		if kv[k] == "" {
+			parts[i] = k
+		} else {
+			parts[i] = k + "=" + kv[k]
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 func (s *Server) summary() string {
