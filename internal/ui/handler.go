@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"mock-server/internal/rule"
-	"mock-server/internal/server"
+	"github.com/flipmorsch/mock-server/internal/rule"
+	"github.com/flipmorsch/mock-server/internal/server"
 )
 
 func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {

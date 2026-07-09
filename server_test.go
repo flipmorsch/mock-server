@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	. "mock-server/internal/rule"
-	. "mock-server/internal/server"
+	. "github.com/flipmorsch/mock-server/internal/rule"
+	. "github.com/flipmorsch/mock-server/internal/server"
 )
 
 func TestServerMatchedRule(t *testing.T) {

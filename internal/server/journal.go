@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"mock-server/internal/rule"
+	"github.com/flipmorsch/mock-server/internal/rule"
 )
 
 type JournalEntry struct {

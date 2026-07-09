@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	. "mock-server/internal/rule"
+	. "github.com/flipmorsch/mock-server/internal/rule"
 )
 
 func TestMatchExactMethodAndPath(t *testing.T) {

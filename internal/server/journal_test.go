@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"mock-server/internal/rule"
+	"github.com/flipmorsch/mock-server/internal/rule"
 )
 
 func TestJournalRingBuffer(t *testing.T) {

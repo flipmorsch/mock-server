@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -10,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"mock-server/internal/rule"
+	"github.com/flipmorsch/mock-server/internal/rule"
 )
 
 type Server struct {
@@ -19,7 +20,8 @@ type Server struct {
 	configPath  string
 	journal     *Journal
 	uiEnabled   bool
-	tlsEnabled  bool // set once at startup before serving; read by the probe
+	tlsEnabled  bool        // set once at startup before serving; read by the probe
+	logger      *log.Logger // nil = silent (embedded/library default)
 	unsaved     bool
 	mu          sync.RWMutex
 }

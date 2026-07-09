@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	. "mock-server/internal/rule"
+	. "github.com/flipmorsch/mock-server/internal/rule"
 )
 
 func TestLoadConfigValid(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -14,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"mock-server/internal/rule"
-	"mock-server/internal/server"
-	"mock-server/internal/ui"
+	"github.com/flipmorsch/mock-server/internal/rule"
+	"github.com/flipmorsch/mock-server/internal/server"
+	"github.com/flipmorsch/mock-server/internal/ui"
 )
 
 const version = "1.0.1"
@@ -59,6 +58,7 @@ func main() {
 
 	journal := server.NewJournal()
 	srv := server.NewServer(cfg, configPath, journal, *uiEnabled)
+	srv.SetLogger(log.Default())
 
 	addr := srv.ListenAddr()
 	if *listenOverride != "" {
@@ -168,75 +168,5 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ui.AdminHandler(h.srv.Journal())(w, r)
 		return
 	}
-	start := time.Now()
-	body, _ := io.ReadAll(r.Body)
-	r.Body.Close()
-
-	reqHeaders := make(map[string]string)
-
-	for k := range r.Header {
-		reqHeaders[http.CanonicalHeaderKey(k)] = r.Header.Get(k)
-	}
-
-	entry := server.JournalEntry{
-		Method:  r.Method,
-		Path:    r.URL.Path,
-		Query:   r.URL.RawQuery,
-		Headers: reqHeaders,
-		Body:    string(body),
-	}
-
-	matched, misses := h.srv.MatchRule(r, body)
-	entry.Explanations = misses
-	if matched != nil {
-		if matched.Response.DelayDuration > 0 {
-			time.Sleep(matched.Response.DelayDuration)
-		}
-		entry.Duration = time.Since(start)
-		log.Printf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, matched.Response.Status, matched.Name)
-		entry.Matched = matched.Name
-		entry.MatchedID = matched.ID
-		entry.Status = matched.Response.Status
-		h.srv.Journal().Record(entry)
-		writeResponse(w, &matched.Response, r, body, h.srv.Journal())
-		return
-	}
-
-	entry.Duration = time.Since(start)
-	log.Printf("%s %s → 404 (no match)", r.Method, r.URL.Path)
-	entry.Status = 404
-	h.srv.Journal().Record(entry)
-	http.NotFound(w, r)
-}
-
-func writeResponse(w http.ResponseWriter, resp *rule.Response, r *http.Request, reqBody []byte, journal *server.Journal) {
-	body := resp.Body
-	if resp.BodyFile != "" {
-		data, err := os.ReadFile(resp.BodyFile)
-		if err != nil {
-			log.Printf("body_file error: %v", err)
-			http.Error(w, "body_file read failed", http.StatusInternalServerError)
-			return
-		}
-		body = string(data)
-	}
-	for k, v := range resp.Headers {
-		w.Header().Set(k, v)
-	}
-	if _, ok := resp.Headers["Content-Type"]; !ok {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	}
-	w.WriteHeader(resp.Status)
-	if body == "" {
-		return
-	}
-	if resp.Template {
-		var err error
-		body, err = rule.ExecuteTemplate(body, r, reqBody, func(f *rule.RequestFilter) int64 { return int64(journal.Count(f)) })
-		if err != nil {
-			log.Printf("template error: %v", err)
-			return
-		}
-	}
-	fmt.Fprint(w, body)
+	h.srv.ServeMock(w, r)
 }

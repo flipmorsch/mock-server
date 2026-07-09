@@ -1,4 +1,4 @@
-module mock-server
+module github.com/flipmorsch/mock-server
 
 go 1.26.4
 

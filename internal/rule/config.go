@@ -21,16 +21,19 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
+	return ParseConfig(data)
+}
 
+// ParseConfig parses and validates a YAML config from bytes (used by the
+// embeddable library, which has no file on disk).
+func ParseConfig(data []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
-
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-
 	return &cfg, nil
 }
 
