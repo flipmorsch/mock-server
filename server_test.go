@@ -340,6 +340,64 @@ func TestServerTemplatePathParam(t *testing.T) {
 	}
 }
 
+func TestServerTemplateResponseHeader(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "create user",
+				Request: Request{
+					Method:   "POST",
+					Path:     "/users/{id}",
+					PathMode: "pattern",
+				},
+				Response: Response{
+					Status:   201,
+					Template: true,
+					Headers:  map[string]string{"Location": `/users/{{.Param "id"}}`},
+					Body:     "created",
+				},
+			},
+		},
+	}
+
+	h := &handler{srv: NewServer(cfg, "", NewJournal(), false)}
+	req := httptest.NewRequest("POST", "/users/42", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != 201 {
+		t.Errorf("status = %d, want 201", w.Code)
+	}
+	if got := w.Header().Get("Location"); got != "/users/42" {
+		t.Errorf("Location = %q, want /users/42", got)
+	}
+}
+
+func TestServerResponseHeaderLiteralWithoutTemplate(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name:    "static",
+				Request: Request{Method: "GET", Path: "/x"},
+				Response: Response{
+					Status:  200,
+					Headers: map[string]string{"Location": `/users/{{.Param "id"}}`},
+					Body:    "ok",
+				},
+			},
+		},
+	}
+
+	h := &handler{srv: NewServer(cfg, "", NewJournal(), false)}
+	req := httptest.NewRequest("GET", "/x", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if got := w.Header().Get("Location"); got != `/users/{{.Param "id"}}` {
+		t.Errorf("Location = %q, want the literal template (Template not set)", got)
+	}
+}
+
 func TestServerTemplateHeaderAndQuery(t *testing.T) {
 	cfg := &Config{
 		Rules: []Rule{

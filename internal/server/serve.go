@@ -101,7 +101,18 @@ func (s *Server) writeResponse(w http.ResponseWriter, resp *rule.Response, r *ht
 		}
 		body = string(data)
 	}
+	counter := s.templateCounter(r)
 	for k, v := range resp.Headers {
+		if resp.Template {
+			// Header values are templated too (keys stay literal), so a 201 can
+			// carry Location: /users/{{.Param "id"}}. A template syntax error
+			// falls back to the raw value rather than failing the response.
+			if out, err := rule.ExecuteTemplate(v, r, reqBody, params, counter); err == nil {
+				v = out
+			} else {
+				s.logf("template error (header %s): %v", k, err)
+			}
+		}
 		w.Header().Set(k, v)
 	}
 	if _, ok := resp.Headers["Content-Type"]; !ok {
@@ -112,13 +123,7 @@ func (s *Server) writeResponse(w http.ResponseWriter, resp *rule.Response, r *ht
 		return resp.Status, ""
 	}
 	if resp.Template {
-		out, err := rule.ExecuteTemplate(body, r, reqBody, params, func(f *rule.RequestFilter) int64 {
-			n := int64(s.journal.Count(f))
-			if currentRequestMatches(f, r) {
-				n++ // include the in-flight request; it's journaled only after this write
-			}
-			return n
-		})
+		out, err := rule.ExecuteTemplate(body, r, reqBody, params, counter)
 		if err != nil {
 			s.logf("template error: %v", err)
 			return resp.Status, ""
@@ -127,6 +132,19 @@ func (s *Server) writeResponse(w http.ResponseWriter, resp *rule.Response, r *ht
 	}
 	fmt.Fprint(w, body)
 	return resp.Status, body
+}
+
+// templateCounter builds the requestCount backing func for one request: the
+// journal tally plus the in-flight request, which isn't recorded until after the
+// response is written. Shared by header and body templating.
+func (s *Server) templateCounter(r *http.Request) func(*rule.RequestFilter) int64 {
+	return func(f *rule.RequestFilter) int64 {
+		n := int64(s.journal.Count(f))
+		if currentRequestMatches(f, r) {
+			n++
+		}
+		return n
+	}
 }
 
 // currentRequestMatches reports whether the in-flight request satisfies the
