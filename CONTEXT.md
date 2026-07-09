@@ -63,7 +63,7 @@ A failed `Verify*` lists every received request with its (truncated) body. When 
 A graphical interface for managing Rules and server configuration, embedded in the mock server binary. Activated with the `--ui` CLI flag; disabled by default. The UI is served under the `/_ui/` path prefix, which is a reserved namespace — user-defined Rules never match requests to `/_ui/` paths.
 
 ### Rule Management
-The UI supports creating, reading, updating, duplicating, deleting, and reordering Rules (drag-and-drop). Changes are held in-memory as a working copy until the user explicitly saves.
+The UI supports creating, reading, updating, duplicating, deleting, and reordering Rules (drag-and-drop). Changes are held as a working copy in the browser (the authoring island) until the user explicitly saves; unsaved edits do not survive a page reload. See ADR-0010.
 
 ### Save
 An explicit user action that writes the current working copy to the YAML configuration file on disk and immediately updates the running Rule set to match. A failed Save leaves the running Rule set unchanged and shows the error inline in the UI. Unsaved changes trigger a browser warning before navigating away.
@@ -100,10 +100,10 @@ External modifications to the config file while the server is running are not de
 A preview panel renders the Rule's template body against user-supplied sample data (method, path, headers, body), available when `template: true` is set. Default sample: `GET /sample` with empty body and headers.
 
 ### Technology
-Built with server-rendered HTML using [Templ](https://templ.guide) components and [htmx](https://htmx.org) for interactivity. Drag-and-drop reordering uses [Alpine.js](https://alpinejs.dev). Styling via a hand-written embedded stylesheet (no CSS framework, no build step beyond `templ generate`). All static assets are embedded via `//go:embed`.
+The UI is split into two surfaces. The **observation surface** (request journal, match explanations, shell, nav) is server-rendered [Templ](https://templ.guide) + [htmx](https://htmx.org), with the live journal fed by Server-Sent Events. The **authoring surface** (rule list + rule editor) is a reactive [Vue 3](https://vuejs.org) island loaded buildless via an ESM importmap — no bundler, no Node; `templ generate` remains the only build step. The two communicate through DOM `CustomEvent`s (fired via htmx `HX-Trigger`). Styling is a hand-written embedded stylesheet (no CSS framework). All assets are embedded via `//go:embed` into the single static binary. See ADR-0009.
 
 ### API
-The UI communicates with the server through form-encoded endpoints under `/_ui/api/` returning HTML fragments (plus `HX-Trigger` events for cross-surface updates), htmx partial endpoints under `/_ui/partials/`, and a Server-Sent Events stream at `/_ui/api/events` feeding the live Journal. The programmatic JSON API lives under `/__admin/`. The server uses Go 1.22+ `net/http` enhanced ServeMux for routing (no external router dependency).
+The authoring island seeds itself from `GET /_ui/api/rules` (JSON) and persists via `POST /_ui/api/save` (the whole working copy as JSON); dry-run, probe, and template-preview are JSON round-trips to the same server-side engines. The observation surface uses server-rendered htmx fragments plus a Server-Sent Events stream at `/_ui/api/events` feeding the live Journal, and `HX-Trigger` events for cross-surface updates. The programmatic JSON API lives under `/__admin/`. The server uses Go 1.22+ `net/http` enhanced ServeMux for routing (no external router dependency).
 
 ## Configuration
 Rules are defined in a YAML configuration file. The server reads this file at startup and writes to it when the user saves via the Web UI. The `listen` address is configurable both in the file and through the UI.
