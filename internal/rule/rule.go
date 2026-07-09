@@ -62,10 +62,18 @@ type templateData struct {
 	Path   string
 	Body   string
 	req    *http.Request
+	params map[string]string
 }
 
 func (d *templateData) Header(name string) string {
 	return d.req.Header.Get(name)
+}
+
+// Param returns the value a "pattern" or "regex" rule captured for a named path
+// segment (e.g. {{.Param "id"}} for /users/{id}). An unknown name yields "", so a
+// template referencing a missing param renders empty rather than failing.
+func (d *templateData) Param(name string) string {
+	return d.params[name]
 }
 
 func (d *templateData) Query(name string) string {

@@ -47,7 +47,7 @@ func templateFuncs(counter func(*RequestFilter) int64) template.FuncMap {
 	}
 }
 
-func ExecuteTemplate(body string, r *http.Request, reqBody []byte, counter func(*RequestFilter) int64) (string, error) {
+func ExecuteTemplate(body string, r *http.Request, reqBody []byte, params map[string]string, counter func(*RequestFilter) int64) (string, error) {
 	tmpl, err := template.New("response").Funcs(templateFuncs(counter)).Parse(body)
 	if err != nil {
 		return "", err
@@ -58,6 +58,7 @@ func ExecuteTemplate(body string, r *http.Request, reqBody []byte, counter func(
 		Path:   r.URL.Path,
 		Body:   string(reqBody),
 		req:    r,
+		params: params,
 	}
 
 	var sb strings.Builder

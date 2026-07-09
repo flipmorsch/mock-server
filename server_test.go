@@ -311,6 +311,35 @@ func TestServerTemplateBodyEcho(t *testing.T) {
 	}
 }
 
+func TestServerTemplatePathParam(t *testing.T) {
+	cfg := &Config{
+		Rules: []Rule{
+			{
+				Name: "user by id",
+				Request: Request{
+					Method:   "GET",
+					Path:     "/users/{id}",
+					PathMode: "pattern",
+				},
+				Response: Response{
+					Status:   200,
+					Template: true,
+					Body:     `{"id":"{{.Param "id"}}"}`,
+				},
+			},
+		},
+	}
+
+	h := &handler{srv: NewServer(cfg, "", NewJournal(), false)}
+	req := httptest.NewRequest("GET", "/users/42", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if got := w.Body.String(); got != `{"id":"42"}` {
+		t.Errorf("body = %q, want '{\"id\":\"42\"}'", got)
+	}
+}
+
 func TestServerTemplateHeaderAndQuery(t *testing.T) {
 	cfg := &Config{
 		Rules: []Rule{

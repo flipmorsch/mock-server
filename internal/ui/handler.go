@@ -189,7 +189,8 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 		r.ParseForm()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		probe := decodeProbeRequest(r)
-		result, err := executePreview(r.FormValue("body"), probe)
+		params := rule.PathParams(r.FormValue("path_mode"), r.FormValue("path"), probe.Path)
+		result, err := executePreview(r.FormValue("body"), probe, params)
 		if err != nil {
 			TestError("template error: "+err.Error()).Render(r.Context(), w)
 			return
@@ -454,7 +455,7 @@ func sendProbe(addr string, useTLS bool, probe ProbeRequest) (*ProbeResult, erro
 	return &ProbeResult{Status: resp.StatusCode, Headers: headers, Body: string(respBody)}, nil
 }
 
-func executePreview(body string, probe ProbeRequest) (string, error) {
+func executePreview(body string, probe ProbeRequest, params map[string]string) (string, error) {
 	req, err := http.NewRequest(probe.Method, probe.Path, nil)
 	if err != nil {
 		return "", err
@@ -462,7 +463,7 @@ func executePreview(body string, probe ProbeRequest) (string, error) {
 	for k, v := range probe.Headers {
 		req.Header.Set(k, v)
 	}
-	return rule.ExecuteTemplate(body, req, []byte(probe.Body), func(*rule.RequestFilter) int64 { return 0 })
+	return rule.ExecuteTemplate(body, req, []byte(probe.Body), params, func(*rule.RequestFilter) int64 { return 0 })
 }
 
 // ---- admin API (programmatic, unchanged contract) --------------------------

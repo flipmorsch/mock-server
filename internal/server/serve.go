@@ -68,7 +68,8 @@ func (s *Server) ServeMock(w http.ResponseWriter, r *http.Request) {
 		if resp.DelayDuration > 0 {
 			time.Sleep(resp.DelayDuration)
 		}
-		status, respBody := s.writeResponse(w, resp, r, body)
+		params := rule.PathParams(matched.Request.PathMode, matched.Request.Path, r.URL.Path)
+		status, respBody := s.writeResponse(w, resp, r, body, params)
 		entry.Duration = time.Since(start)
 		s.logf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, status, matched.Name)
 		entry.Matched = matched.Name
@@ -88,7 +89,7 @@ func (s *Server) ServeMock(w http.ResponseWriter, r *http.Request) {
 
 // writeResponse writes the mock response and returns the status and body it
 // actually produced, so the caller can record them in the journal.
-func (s *Server) writeResponse(w http.ResponseWriter, resp *rule.Response, r *http.Request, reqBody []byte) (int, string) {
+func (s *Server) writeResponse(w http.ResponseWriter, resp *rule.Response, r *http.Request, reqBody []byte, params map[string]string) (int, string) {
 	body := resp.Body
 	if resp.BodyFile != "" {
 		data, err := os.ReadFile(resp.BodyFile)
@@ -111,7 +112,7 @@ func (s *Server) writeResponse(w http.ResponseWriter, resp *rule.Response, r *ht
 		return resp.Status, ""
 	}
 	if resp.Template {
-		out, err := rule.ExecuteTemplate(body, r, reqBody, func(f *rule.RequestFilter) int64 {
+		out, err := rule.ExecuteTemplate(body, r, reqBody, params, func(f *rule.RequestFilter) int64 {
 			n := int64(s.journal.Count(f))
 			if currentRequestMatches(f, r) {
 				n++ // include the in-flight request; it's journaled only after this write
