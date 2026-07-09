@@ -59,9 +59,14 @@ func Explain(rl *Rule, r *http.Request, body []byte) RuleVerdict {
 		if bm == "" {
 			bm = "exact"
 		}
-		ok := bodyStr == rl.Request.Body.Value
-		if bm == "contains" {
+		var ok bool
+		switch bm {
+		case "contains":
 			ok = strings.Contains(bodyStr, rl.Request.Body.Value)
+		case "json":
+			ok = JSONBodyMatches(rl.Request.Body.Value, bodyStr)
+		default:
+			ok = bodyStr == rl.Request.Body.Value
 		}
 		add("body", bm+" "+rl.Request.Body.Value, truncate(bodyStr, 120), ok)
 	}

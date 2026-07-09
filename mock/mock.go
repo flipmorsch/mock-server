@@ -31,14 +31,24 @@ type Server struct {
 	url     string
 }
 
-// Request is a request the mock received.
+// Request is a request the mock received, plus how the mock responded.
 type Request struct {
-	Method  string
-	Path    string
-	Query   string
-	Headers map[string]string // sensitive headers (Authorization, Cookie, …) are redacted
-	Body    string
-	Status  int // status the mock responded with
+	Method       string
+	Path         string
+	Query        string
+	Headers      map[string]string // sensitive headers (Authorization, Cookie, …) are redacted
+	Body         string
+	Status       int    // status the mock responded with
+	ResponseBody string // body the mock returned
+}
+
+// Match selects received requests. Empty fields match anything. JSONBody, when
+// set, requires the request body to contain it as a JSON subset (object fields
+// partial, arrays element-wise, scalars equal).
+type Match struct {
+	Method   string
+	Path     string
+	JSONBody string
 }
 
 // Start launches a mock on a random loopback port, serving rules parsed from the
@@ -82,12 +92,13 @@ func (s *Server) Received() []Request {
 	out := make([]Request, len(entries))
 	for i, e := range entries {
 		out[i] = Request{
-			Method:  e.Method,
-			Path:    e.Path,
-			Query:   e.Query,
-			Headers: e.Headers,
-			Body:    e.Body,
-			Status:  e.Status,
+			Method:       e.Method,
+			Path:         e.Path,
+			Query:        e.Query,
+			Headers:      e.Headers,
+			Body:         e.Body,
+			Status:       e.Status,
+			ResponseBody: e.ResponseBody,
 		}
 	}
 	return out
@@ -118,6 +129,35 @@ func (s *Server) VerifyCalled(method, path string) error {
 			orAny(method), orAny(path), s.summary())
 	}
 	return nil
+}
+
+// CountMatch returns how many received requests satisfy m (including its JSON
+// body subset, if set). Body-filtered counts are scoped to the retained window.
+func (s *Server) CountMatch(m Match) int {
+	f := &rule.RequestFilter{Method: m.Method, Path: m.Path}
+	if m.JSONBody != "" {
+		f.Body = m.JSONBody
+		f.BodyMode = "json"
+	}
+	return s.journal.Count(f)
+}
+
+// VerifyMatch asserts the mock received exactly n requests satisfying m. On
+// mismatch the error lists what was actually received.
+func (s *Server) VerifyMatch(m Match, n int) error {
+	if got := s.CountMatch(m); got != n {
+		return fmt.Errorf("expected %d request(s) matching %s, got %d\nreceived:\n%s",
+			n, m, got, s.summary())
+	}
+	return nil
+}
+
+func (m Match) String() string {
+	s := orAny(m.Method) + " " + orAny(m.Path)
+	if m.JSONBody != "" {
+		s += " body⊇" + m.JSONBody
+	}
+	return s
 }
 
 func (s *Server) summary() string {

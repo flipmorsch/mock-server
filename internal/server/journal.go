@@ -22,6 +22,7 @@ type JournalEntry struct {
 	Matched      string             `json:"matched"`
 	MatchedID    string             `json:"matched_id,omitempty"`
 	Status       int                `json:"status"`
+	ResponseBody string             `json:"response_body,omitempty"`
 	Duration     time.Duration      `json:"duration_ns"`
 	Explanations []rule.RuleVerdict `json:"explanations,omitempty"`
 }
@@ -85,6 +86,9 @@ func redactHeaders(h map[string]string) map[string]string {
 func (j *Journal) Record(e JournalEntry) {
 	if len(e.Body) > maxBodyRecord {
 		e.Body = e.Body[:maxBodyRecord]
+	}
+	if len(e.ResponseBody) > maxBodyRecord {
+		e.ResponseBody = e.ResponseBody[:maxBodyRecord]
 	}
 	e.Headers = redactHeaders(e.Headers)
 	e.Timestamp = time.Now()
@@ -224,6 +228,10 @@ func requestFilterMatch(f *rule.RequestFilter, e *JournalEntry) bool {
 		switch f.BodyMode {
 		case "contains":
 			if !strings.Contains(e.Body, f.Body) {
+				return false
+			}
+		case "json":
+			if !rule.JSONBodyMatches(f.Body, e.Body) {
 				return false
 			}
 		default:

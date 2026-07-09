@@ -69,9 +69,9 @@ func CheckRule(r Rule) error {
 	}
 	if r.Request.Body != nil {
 		switch r.Request.Body.Mode {
-		case "exact", "contains", "":
+		case "exact", "contains", "json", "":
 		default:
-			return fmt.Errorf("unsupported body mode %q (supported: exact, contains)", r.Request.Body.Mode)
+			return fmt.Errorf("unsupported body mode %q (supported: exact, contains, json)", r.Request.Body.Mode)
 		}
 	}
 	if r.Response.Body != "" && r.Response.BodyFile != "" {

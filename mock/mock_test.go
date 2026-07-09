@@ -68,6 +68,25 @@ func TestEmbeddedMock(t *testing.T) {
 		t.Errorf("failure should list received requests, got: %v", err)
 	}
 
+	// JSON subset body matching in verification.
+	if err := m.VerifyMatch(mock.Match{Method: "POST", Path: "/users", JSONBody: `{"name":"Bob"}`}, 1); err != nil {
+		t.Errorf("VerifyMatch json subset: %v", err)
+	}
+	if err := m.VerifyMatch(mock.Match{Method: "POST", Path: "/users", JSONBody: `{"name":"Zed"}`}, 1); err == nil {
+		t.Error("VerifyMatch should fail for a non-matching JSON body")
+	}
+
+	// Response capture: the journal records what the mock returned.
+	var got mock.Request
+	for _, rq := range m.Received() {
+		if rq.Method == "GET" && rq.Path == "/users/1" {
+			got = rq
+		}
+	}
+	if !strings.Contains(got.ResponseBody, "Alice") {
+		t.Errorf("response body not captured: %q", got.ResponseBody)
+	}
+
 	if n := len(m.Received()); n != 2 {
 		t.Errorf("Received len = %d, want 2", n)
 	}
