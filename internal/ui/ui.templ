@@ -69,6 +69,16 @@ func methodClass(m string) string {
 	return "method method-" + strings.ToUpper(strings.TrimSpace(m))
 }
 
+// matchedLabel is the journal's display name for a matched rule. A rule that
+// matched always has an id but may have no name — show "(unnamed)" rather than
+// letting an empty name read as no match.
+func matchedLabel(name string) string {
+	if name == "" {
+		return "(unnamed)"
+	}
+	return name
+}
+
 // respEditorInit renders the initial Alpine state for respEditor as a JSON
 // literal: "single" mode with an empty list for a normal rule, or "sequence"
 // mode seeded from the rule's responses (headers as an ordered k/v array). The
@@ -424,8 +434,11 @@ templ JournalRow(e server.JournalEntry) {
 			</span>
 			<span class={ statusClass(e.Status) }>{ strconv.Itoa(e.Status) }</span>
 			<span class="jdur">{ fmtDuration(e.Duration) }</span>
-			if e.Matched != "" {
-				<span class="jmatch">→ { e.Matched }</span>
+			if e.MatchedID != "" {
+				<span class="jmatch">→ { matchedLabel(e.Matched) }</span>
+				if e.SeqTotal > 0 {
+					<span class="jseq" title="which response in the sequence served this request">seq { strconv.Itoa(e.SeqPos) }/{ strconv.Itoa(e.SeqTotal) }</span>
+				}
 			} else {
 				<span class="jmatch jmiss">
 					✖ no match
@@ -459,7 +472,7 @@ templ JournalRow(e server.JournalEntry) {
 }
 
 templ Explanation(e server.JournalEntry) {
-	if e.Matched != "" {
+	if e.MatchedID != "" {
 		<div class="jdetail-title">matched</div>
 		<div class="vblock">
 			<a
@@ -468,7 +481,7 @@ templ Explanation(e server.JournalEntry) {
 				hx-get={ "/_ui/partials/rule-editor/" + e.MatchedID }
 				hx-target="#editor-pane"
 				hx-swap="innerHTML"
-			>{ e.Matched }</a>
+			>{ matchedLabel(e.Matched) }</a>
 			<span class="vok">✓ all criteria matched</span>
 		</div>
 		if len(e.Explanations) > 0 {

@@ -59,7 +59,7 @@ Two test modes per Rule:
 - **Probe** — sends a real HTTP request to the mock server's own listener and displays the mock response (or 404 if the Rule doesn't match).
 
 ### Request Journal
-A live log of recent HTTP requests visible in the UI, stored as an in-memory ring buffer of the last 200 requests. Updates in real-time. No persistence. Each entry also records the response the mock returned (status and body). Sensitive request headers (`Authorization`, `Cookie`, API keys) are redacted. Request counts are tracked with monotonic tallies, so they stay accurate beyond the 200-entry display window.
+A live log of recent HTTP requests visible in the UI, stored as an in-memory ring buffer of the last 200 requests. Updates in real-time. No persistence. Each entry also records the response the mock returned (status and body), and — when a sequenced Rule matched — which response in the sequence served that request. Sensitive request headers (`Authorization`, `Cookie`, API keys) are redacted. Request counts are tracked with monotonic tallies, so they stay accurate beyond the 200-entry display window.
 
 ### Match Explanation
 A per-request diagnostic answering "why did this request get this response." For an unmatched request, it shows the Rules that came closest to matching, ranked by closeness, each with the exact match dimension that failed (expected vs. actual value). For a matched request, it identifies the winning Rule; the verdicts of earlier skipped Rules are available on demand (diagnosing an early broad Rule shadowing a later specific one under first-match-wins). Explanations appear on Journal entries and in dry-run results.

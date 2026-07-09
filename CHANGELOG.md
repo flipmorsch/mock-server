@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0
+
+- **Journal shows the sequence position.** A request matched by a sequenced rule is annotated with which response served it — `→ poll job  seq 2/3` — in the live journal and the `/__admin/requests` JSON (`seq_pos`/`seq_total`). Answers "why did I get this response on this call?" at a glance. The position is clamped once the sequence is exhausted (last sticks).
+- **Fix:** a request matched by a rule with no `name` rendered as "✖ no match" in the journal (matched-vs-not was keyed off the name, not whether a rule matched). It now shows `→ (unnamed)` and links to the rule; matched-detection uses the rule id.
+
 ## 1.3.0
 
 - **Edit sequenced responses in the Web UI.** The response editor gains an ordered, editable list: add a second response to make a rule sequenced, reorder with up/down, delete back to one to return to a single response. Sequenced rules are no longer read-only in the UI. See ADR-0008.

@@ -25,6 +25,11 @@ type JournalEntry struct {
 	ResponseBody string             `json:"response_body,omitempty"`
 	Duration     time.Duration      `json:"duration_ns"`
 	Explanations []rule.RuleVerdict `json:"explanations,omitempty"`
+	// For a match against a sequenced rule: which element served this request
+	// (1-based) and how many there are. Zero when the matched rule isn't
+	// sequenced. Answers "why did I get this response on this call?".
+	SeqPos   int `json:"seq_pos,omitempty"`
+	SeqTotal int `json:"seq_total,omitempty"`
 }
 
 const (

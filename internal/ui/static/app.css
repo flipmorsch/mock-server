@@ -339,6 +339,17 @@ body.editing .editor-pane {
   margin-left: 4px;
 }
 
+.jseq {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 4px;
+  font-size: 11px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .jdur { color: var(--fg-dim); font-size: 11px; margin-left: 6px; white-space: nowrap; }
 
 

@@ -59,3 +59,42 @@ func TestSequencedReloadPreservesIndex(t *testing.T) {
 		t.Errorf("hit after reset: got %d, want 202", got)
 	}
 }
+
+// The journal records which sequence element served each request (1-based,
+// clamped once exhausted), so the UI can show "seq N/M". A non-sequenced match
+// records zeroes.
+func TestSequencePositionRecordedInJournal(t *testing.T) {
+	cfg, err := rule.ParseConfig([]byte(`rules:
+  - id: job
+    request: {method: GET, path: /jobs/1}
+    responses:
+      - {status: 202}
+      - {status: 200}
+  - name: plain
+    request: {method: GET, path: /health}
+    response: {status: 200}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := NewJournal()
+	s := NewServer(cfg, "", j, false)
+	hit := func(path string) {
+		s.ServeMock(httptest.NewRecorder(), httptest.NewRequest("GET", path, nil))
+	}
+	hit("/jobs/1")
+	hit("/jobs/1")
+	hit("/jobs/1") // exhausted → clamps to last
+	hit("/health") // not sequenced
+
+	entries := j.Entries(nil) // oldest first
+	want := []struct{ pos, total int }{{1, 2}, {2, 2}, {2, 2}, {0, 0}}
+	if len(entries) != len(want) {
+		t.Fatalf("want %d entries, got %d", len(want), len(entries))
+	}
+	for i, e := range entries {
+		if e.SeqPos != want[i].pos || e.SeqTotal != want[i].total {
+			t.Errorf("entry %d (%s): seq %d/%d, want %d/%d", i, e.Path, e.SeqPos, e.SeqTotal, want[i].pos, want[i].total)
+		}
+	}
+}

@@ -59,6 +59,11 @@ func (s *Server) ServeMock(w http.ResponseWriter, r *http.Request) {
 		if matched.Sequenced() {
 			i := s.seq.selectIndex(matched.ID, len(matched.Responses))
 			resp = &matched.Responses[i]
+			// Record which element served this request, so the journal can
+			// answer "why this response on this call?" (i is clamped to the
+			// last element once the sequence is exhausted — last sticks).
+			entry.SeqPos = i + 1
+			entry.SeqTotal = len(matched.Responses)
 		}
 		if resp.DelayDuration > 0 {
 			time.Sleep(resp.DelayDuration)
