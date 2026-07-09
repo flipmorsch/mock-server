@@ -88,6 +88,35 @@ func Start(configYAML string) (*Server, error) {
 	}, nil
 }
 
+// TB is the subset of testing.TB that StartT uses. *testing.T and *testing.B
+// satisfy it, so callers pass their test's t directly (no testing import here).
+type TB interface {
+	Helper()
+	Fatalf(format string, args ...any)
+	Cleanup(func())
+}
+
+// StartT is Start for tests: it fails the test via t.Fatalf if the config doesn't
+// parse, and registers t.Cleanup(m.Close) so the mock shuts down at test end — a
+// forgotten Close can't leak a goroutine or port.
+//
+//	m := mock.StartT(t, `
+//	rules:
+//	  - request: {method: GET, path: /users/1}
+//	    response: {status: 200, body: '{"id":1}'}
+//	`)
+//	resp, _ := http.Get(m.URL() + "/users/1")
+func StartT(t TB, configYAML string) *Server {
+	t.Helper()
+	s, err := Start(configYAML)
+	if err != nil {
+		t.Fatalf("mock.StartT: %v", err)
+		return nil // unreachable with a real testing.TB (Fatalf exits); guards fakes
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
 // URL is the base URL of the running mock (e.g. http://127.0.0.1:54321). Point
 // the code under test at this.
 func (s *Server) URL() string { return s.url }
