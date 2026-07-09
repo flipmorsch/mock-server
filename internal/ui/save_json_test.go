@@ -114,3 +114,37 @@ func TestSaveConfigMalformedJSON(t *testing.T) {
 		t.Fatalf("want 400, got %d", w.Code)
 	}
 }
+
+// A sequenced rule (with the required explicit id) saves, round-trips through the
+// seed, and serves its first response.
+func TestSaveConfigSequencedRule(t *testing.T) {
+	srv, h, _ := newTestUIFile(t, "")
+	body := `{"rules":[{"id":"job","request":{"method":"GET","path":"/job","path_mode":"exact"},
+		"responses":[{"status":202,"body":"pending"},{"status":200,"body":"done"}]}]}`
+	if w := postJSON(t, h, "/_ui/api/save", body); w.Code != http.StatusOK {
+		t.Fatalf("save sequenced: code %d, body %s", w.Code, w.Body.String())
+	}
+	rw := httptest.NewRecorder()
+	h(rw, httptest.NewRequest("GET", "/_ui/api/rules", nil))
+	var cfg rule.Config
+	json.Unmarshal(rw.Body.Bytes(), &cfg)
+	if len(cfg.Rules) != 1 || len(cfg.Rules[0].Responses) != 2 {
+		t.Fatalf("want a 2-element sequence after save, got %+v", cfg.Rules)
+	}
+	m, _ := srv.MatchRule(httptest.NewRequest("GET", "/job", nil), nil)
+	if m == nil || !m.Sequenced() || m.Responses[0].Status != 202 {
+		t.Errorf("sequenced rule not served: %+v", m)
+	}
+}
+
+// An empty responses list is rejected (422) and leaves the file unwritten.
+func TestSaveConfigEmptySequenceRejected(t *testing.T) {
+	_, h, path := newTestUIFile(t, "")
+	body := `{"rules":[{"id":"x","request":{"method":"GET","path":"/x"},"responses":[]}]}`
+	if w := postJSON(t, h, "/_ui/api/save", body); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422 for empty sequence, got %d", w.Code)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("rejected save must not write the file")
+	}
+}

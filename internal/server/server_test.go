@@ -51,7 +51,7 @@ func TestSaveFidelity(t *testing.T) {
 	}
 	s := NewServer(cfg, path, NewJournal(), true)
 
-	if err := s.Save(); err != nil {
+	if err := s.SaveConfig(*cfg); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	data, err := os.ReadFile(path)

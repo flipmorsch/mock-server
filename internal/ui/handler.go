@@ -10,10 +10,8 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/flipmorsch/mock-server/internal/rule"
 	"github.com/flipmorsch/mock-server/internal/server"
@@ -65,119 +63,27 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 		}
 	})
 
-	// ---- rule CRUD (form-encoded in, HTML out) --------------------------
+	// ---- working copy: seed + save (ADR-0010, client-owned) ----------------
 
-	mux.HandleFunc("POST /_ui/api/rules", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		rl, err := ruleFromForm(r)
-		if err != nil {
-			Editor(rl, true, err.Error(), "").Render(r.Context(), w)
-			return
-		}
-		created, err := srv.CreateRule(rl) // mints an id, then validates with it
-		if err != nil {
-			Editor(rl, true, err.Error(), "").Render(r.Context(), w)
-			return
-		}
-		notify(w, "Rule created", true)
-		Editor(created, false, "", "").Render(r.Context(), w)
-	})
-
-	mux.HandleFunc("PUT /_ui/api/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		rl, err := ruleFromForm(r)
-		if err != nil {
-			rl.ID = id
-			Editor(rl, false, err.Error(), "").Render(r.Context(), w)
-			return
-		}
-		// Assign the id before validating: a sequenced rule requires a non-empty
-		// id, and this is the stable one it keeps (ADR-0008).
-		rl.ID = id
-		if err := rule.CheckRule(rl); err != nil {
-			Editor(rl, false, err.Error(), "").Render(r.Context(), w)
-			return
-		}
-		updated, ok := srv.UpdateRule(id, rl)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		notify(w, "Rule updated", true)
-		Editor(*updated, false, "", "").Render(r.Context(), w)
-	})
-
-	mux.HandleFunc("DELETE /_ui/api/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if !srv.DeleteRule(r.PathValue("id")) {
-			http.NotFound(w, r)
-			return
-		}
-		notify(w, "Rule deleted", true)
-		w.Header().Set("HX-Trigger-After-Swap", `{"editor-closed":true}`)
-	})
-
-	mux.HandleFunc("PUT /_ui/api/rules/reorder", func(w http.ResponseWriter, r *http.Request) {
-		var ids []string
-		if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-			http.Error(w, "invalid JSON", http.StatusBadRequest)
-			return
-		}
-		if !srv.ReorderRules(ids) {
-			http.Error(w, "id list must match current rules", http.StatusBadRequest)
-			return
-		}
-		notify(w, "", true)
-	})
-
-	mux.HandleFunc("PUT /_ui/api/config", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		srv.UpdateConfig(r.FormValue("listen"))
-		notify(w, "Listen address staged — restart after save to apply", true)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		SettingsPanel(srv.GetConfig()).Render(r.Context(), w)
-	})
-
-	// Seed for the authoring island (ADR-0010): the whole working copy as JSON.
+	// Seed for the authoring island: the committed rule set as JSON.
 	mux.HandleFunc("GET /_ui/api/rules", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(srv.GetConfig())
+		json.NewEncoder(w).Encode(srv.Config())
 	})
 
+	// Save: the island POSTs the whole working copy as JSON.
 	mux.HandleFunc("POST /_ui/api/save", func(w http.ResponseWriter, r *http.Request) {
-		// The authoring island (ADR-0010) POSTs the whole working copy as JSON;
-		// the legacy htmx UI POSTs an empty body and saves the server-held copy.
-		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-			w.Header().Set("Content-Type", "application/json")
-			var cfg rule.Config
-			if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON: " + err.Error()})
-				return
-			}
-			if err := srv.SaveConfig(cfg); err != nil {
-				w.WriteHeader(http.StatusUnprocessableEntity)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-				return
-			}
-			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		w.Header().Set("Content-Type", "application/json")
+		var cfg rule.Config
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		if err := srv.Save(); err != nil {
-			toast(w, "Save failed: "+err.Error(), "error")
+		if err := srv.SaveConfig(cfg); err != nil {
+			writeJSONErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		notify(w, "Saved to disk", false)
-	})
-
-	// ---- field validation (blur) ----------------------------------------
-
-	mux.HandleFunc("POST /_ui/api/validate", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if msg := validateField(r); msg != "" {
-			FieldError(msg).Render(r.Context(), w)
-		}
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
 
 	// ---- testing (JSON; the island orchestrates, Go engines compute) --------
@@ -257,125 +163,7 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 		json.NewEncoder(w).Encode(ruleFromEntry(e))
 	})
 
-	// ---- partials --------------------------------------------------------
-
-	mux.HandleFunc("GET /_ui/partials/rail", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		Rail(srv.WorkingCopy(), srv.HasUnsaved()).Render(r.Context(), w)
-	})
-
-	mux.HandleFunc("GET /_ui/partials/journal", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		JournalPanel(srv.Journal().Entries(nil)).Render(r.Context(), w)
-	})
-
-	mux.HandleFunc("GET /_ui/partials/rule-editor/{id}", func(w http.ResponseWriter, r *http.Request) {
-		rl := srv.FindRule(r.PathValue("id"))
-		if rl == nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		Editor(*rl, false, "", r.URL.Query().Get("highlight")).Render(r.Context(), w)
-	})
-
-	mux.HandleFunc("GET /_ui/partials/new-rule", func(w http.ResponseWriter, r *http.Request) {
-		rl := rule.Rule{Request: rule.Request{Method: "GET"}, Response: rule.Response{Status: 200}}
-		if seq, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64); err == nil {
-			if e, ok := srv.Journal().Find(seq); ok {
-				rl = ruleFromEntry(e)
-			}
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		Editor(rl, true, "", "").Render(r.Context(), w)
-	})
-
-	mux.HandleFunc("GET /_ui/partials/settings", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		SettingsPanel(srv.GetConfig()).Render(r.Context(), w)
-	})
-
 	return mux.ServeHTTP
-}
-
-// notify sets HX-Trigger events consumed by the shell: rail refresh, the
-// unsaved flag (drives the badge + beforeunload warning), and an optional toast.
-func notify(w http.ResponseWriter, toastMsg string, unsaved bool) {
-	events := map[string]any{"rail-refresh": true, "unsaved": unsaved}
-	if toastMsg != "" {
-		events["toast"] = map[string]string{"msg": toastMsg, "type": "success"}
-	}
-	b, _ := json.Marshal(events)
-	w.Header().Set("HX-Trigger", string(b))
-}
-
-func toast(w http.ResponseWriter, msg, typ string) {
-	b, _ := json.Marshal(map[string]any{"toast": map[string]string{"msg": msg, "type": typ}})
-	w.Header().Set("HX-Trigger", string(b))
-}
-
-// ---- form decoding -------------------------------------------------------
-
-// ruleFromForm builds a rule from the editor form. The response side is read
-// per the explicit resp_mode discriminator (ADR-0008): "sequence" decodes the
-// hidden `responses` JSON field (a 1-element list collapses to a singular
-// response; anything else stays a list, letting CheckRule reject an empty one);
-// otherwise the flat single-response fields are used. Reading only the declared
-// mode's fields keeps response/responses mutually exclusive by construction.
-func ruleFromForm(r *http.Request) (rule.Rule, error) {
-	r.ParseForm()
-	rl := rule.Rule{
-		Name: r.FormValue("name"),
-		Request: rule.Request{
-			Method:   r.FormValue("method"),
-			Path:     r.FormValue("path"),
-			PathMode: r.FormValue("path_mode"),
-			Headers:  kvFromForm(r, "reqh"),
-			Query:    kvFromForm(r, "reqq"),
-		},
-	}
-	if mode := r.FormValue("body_mode"); mode != "" && mode != "none" {
-		rl.Request.Body = &rule.BodyMatch{Mode: mode, Value: r.FormValue("body_match")}
-	}
-
-	if r.FormValue("resp_mode") == "sequence" {
-		var resps []rule.Response
-		if err := json.Unmarshal([]byte(r.FormValue("responses")), &resps); err != nil {
-			return rl, fmt.Errorf("invalid responses list: %w", err)
-		}
-		if len(resps) == 1 {
-			rl.Response = resps[0] // a lone element is just a single response
-		} else {
-			rl.Responses = resps // 0 (rejected by CheckRule) or >= 2 (sequenced)
-		}
-		return rl, nil
-	}
-
-	status, _ := strconv.Atoi(r.FormValue("status"))
-	rl.Response = rule.Response{
-		Status:   status,
-		Headers:  kvFromForm(r, "resph"),
-		Body:     r.FormValue("body"),
-		BodyFile: r.FormValue("body_file"),
-		Delay:    r.FormValue("delay"),
-		Template: r.FormValue("template") != "",
-	}
-	return rl, nil
-}
-
-func kvFromForm(r *http.Request, prefix string) map[string]string {
-	keys, vals := r.Form[prefix+"_k"], r.Form[prefix+"_v"]
-	m := make(map[string]string)
-	for i, k := range keys {
-		if k == "" || i >= len(vals) {
-			continue
-		}
-		m[k] = vals[i]
-	}
-	if len(m) == 0 {
-		return nil
-	}
-	return m
 }
 
 // ruleFromEntry seeds a new rule from a captured request (rule-from-request).
@@ -401,34 +189,6 @@ func ruleFromEntry(e server.JournalEntry) rule.Rule {
 		rl.Request.Body = &rule.BodyMatch{Mode: "exact", Value: e.Body}
 	}
 	return rl
-}
-
-func validateField(r *http.Request) string {
-	switch r.FormValue("field") {
-	case "path":
-		path := r.FormValue("path")
-		if path == "" {
-			return "path is required"
-		}
-		if r.FormValue("path_mode") == "regex" {
-			if _, err := regexp.Compile(path); err != nil {
-				return "invalid regex: " + err.Error()
-			}
-		}
-	case "delay":
-		if d := r.FormValue("delay"); d != "" {
-			if _, err := time.ParseDuration(d); err != nil {
-				return `invalid duration (e.g. 500ms, 2s)`
-			}
-		}
-	case "status":
-		s := r.FormValue("status")
-		n, err := strconv.Atoi(s)
-		if s == "" || err != nil || n < 100 || n > 599 {
-			return "status must be 100-599"
-		}
-	}
-	return ""
 }
 
 // ---- probing -------------------------------------------------------------

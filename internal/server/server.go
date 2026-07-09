@@ -15,16 +15,14 @@ import (
 )
 
 type Server struct {
-	config      *rule.Config
-	workingCopy *rule.Config
-	configPath  string
-	journal     *Journal
-	uiEnabled   bool
-	tlsEnabled  bool        // set once at startup before serving; read by the probe
-	logger      *log.Logger // nil = silent (embedded/library default)
-	unsaved     bool
-	mu          sync.RWMutex
-	seq         *sequences // per-rule position for sequenced responses
+	config     *rule.Config
+	configPath string
+	journal    *Journal
+	uiEnabled  bool
+	tlsEnabled bool        // set once at startup before serving; read by the probe
+	logger     *log.Logger // nil = silent (embedded/library default)
+	mu         sync.RWMutex
+	seq        *sequences // per-rule position for sequenced responses
 }
 
 func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled bool) *Server {
@@ -38,12 +36,11 @@ func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled 
 	seq := newSequences()
 	seq.seed(cfg.Rules)
 	return &Server{
-		config:      cfg,
-		workingCopy: cloneConfig(cfg),
-		configPath:  configPath,
-		journal:     journal,
-		uiEnabled:   uiEnabled,
-		seq:         seq,
+		config:     cfg,
+		configPath: configPath,
+		journal:    journal,
+		uiEnabled:  uiEnabled,
+		seq:        seq,
 	}
 }
 
@@ -80,10 +77,12 @@ func cloneConfig(cfg *rule.Config) *rule.Config {
 	return &clone
 }
 
-func (s *Server) WorkingCopy() []rule.Rule {
+// Config returns the committed (serving) rule set — the seed the authoring
+// island loads (ADR-0010).
+func (s *Server) Config() rule.Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.workingCopy.Rules
+	return *s.config
 }
 
 func (s *Server) ListenAddr() string {
@@ -92,157 +91,31 @@ func (s *Server) ListenAddr() string {
 	return s.config.ListenAddr()
 }
 
-func (s *Server) FindRule(id string) *rule.Rule {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.workingCopy.Rules {
-		if s.workingCopy.Rules[i].ID == id {
-			return &s.workingCopy.Rules[i]
-		}
-	}
-	return nil
-}
-
-// CreateRule mints a stable id, validates the rule with that id in place, then
-// appends it. Validating after minting is what lets a sequenced rule pass the
-// "responses requires an explicit id" guard (ADR-0008).
-func (s *Server) CreateRule(r rule.Rule) (rule.Rule, error) {
-	r.ID = newID()
-	if err := rule.CheckRule(r); err != nil {
-		return rule.Rule{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.workingCopy.Rules = append(s.workingCopy.Rules, r)
-	s.unsaved = true
-	return r, nil
-}
-
-func (s *Server) UpdateRule(id string, updated rule.Rule) (*rule.Rule, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.workingCopy.Rules {
-		if s.workingCopy.Rules[i].ID == id {
-			updated.ID = id
-			s.workingCopy.Rules[i] = updated
-			s.unsaved = true
-			return &s.workingCopy.Rules[i], true
-		}
-	}
-	return nil, false
-}
-
-func (s *Server) DeleteRule(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.workingCopy.Rules {
-		if s.workingCopy.Rules[i].ID == id {
-			s.workingCopy.Rules = append(s.workingCopy.Rules[:i], s.workingCopy.Rules[i+1:]...)
-			s.unsaved = true
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Server) ReorderRules(ids []string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(ids) != len(s.workingCopy.Rules) {
-		return false
-	}
-	lookup := make(map[string]rule.Rule)
-	for _, r := range s.workingCopy.Rules {
-		lookup[r.ID] = r
-	}
-	ordered := make([]rule.Rule, 0, len(ids))
-	for _, id := range ids {
-		r, ok := lookup[id]
-		if !ok {
-			return false
-		}
-		ordered = append(ordered, r)
-	}
-	s.workingCopy.Rules = ordered
-	s.unsaved = true
-	return true
-}
-
-func (s *Server) UpdateConfig(listen string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.workingCopy.Listen = listen
-	s.unsaved = true
-}
-
-func (s *Server) GetConfig() rule.Config {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return *s.workingCopy
-}
-
-func (s *Server) HasUnsaved() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.unsaved
-}
-
-func (s *Server) Save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveLocked()
-}
-
-// SaveConfig replaces the working copy with cfg and persists it. The authoring
-// island (ADR-0010) owns the working copy client-side and POSTs the whole thing
-// on save; the write path (Check → Validate → write → swap serving config) is
-// shared with Save. Client-supplied rules already carry ids, so Check's pre-mint
-// id-less-sequenced guard sees them and never false-rejects.
+// SaveConfig persists cfg — the whole client-owned working copy (ADR-0010) — to
+// disk and swaps it into the serving set. Check runs BEFORE cloneConfig mints
+// ids, so the "responses requires an explicit id" guard (ADR-0007) sees the
+// pre-mint state; the file keeps the user's body_file refs and raw delay
+// strings. A rejected save leaves the serving config untouched.
 func (s *Server) SaveConfig(cfg rule.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	prev := s.workingCopy
-	s.workingCopy = &cfg
-	if err := s.saveLocked(); err != nil {
-		s.workingCopy = prev // a rejected save must not leave the invalid copy staged
+
+	if err := cfg.Check(); err != nil {
 		return err
 	}
-	return nil
-}
-
-// saveLocked persists the current working copy to disk and swaps it into the
-// serving config. The caller must hold s.mu.
-func (s *Server) saveLocked() error {
-	// Validate the working copy BEFORE cloneConfig mints ids, so the
-	// "responses requires an explicit id" guard sees the pre-mint state and an
-	// id-less sequenced rule can't slip through by getting a minted id first
-	// (closes the ADR-0007 landmine). Check is non-mutating; every working-copy
-	// rule already carries an id, so this never false-rejects.
-	if err := s.workingCopy.Check(); err != nil {
-		return err
-	}
-
-	// The file keeps the user's body_file references and raw delay strings;
-	// body_file content is read at serve time, delays are parsed by Validate.
-	// cloneConfig mints IDs for id-less rules, so the id-less-sequenced guard is
-	// enforced by the Check above (pre-mint), not here.
-	serving := cloneConfig(s.workingCopy)
+	serving := cloneConfig(&cfg)
 	if err := serving.Validate(); err != nil {
 		return err
 	}
-
-	data, err := yaml.Marshal(s.workingCopy)
+	data, err := yaml.Marshal(&cfg)
 	if err != nil {
 		return fmt.Errorf("serialization failed: %w", err)
 	}
-
 	if err := os.WriteFile(s.configPath, data, 0644); err != nil {
 		return fmt.Errorf("write failed: %w", err)
 	}
-
 	s.config = serving
 	s.seq.seed(serving.Rules)
-	s.unsaved = false
 	return nil
 }
 

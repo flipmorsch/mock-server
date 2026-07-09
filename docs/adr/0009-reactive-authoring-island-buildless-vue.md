@@ -14,9 +14,9 @@ and the single static binary is preserved.
 - The driver is rich *client* interactivity, and a browser is already the richest
   client-reactive runtime there is — the capability gap is Alpine's, not the web's.
 - **Islands, not a full SPA.** The journal is the debug-first moat (ADR-0003), it
-  is read-only, and htmx+SSE serve it well. The clean seam is authoring (stateful,
-  client-reactive) vs. observation (streaming, server-rendered). An SPA would
-  rebuild the moat for no user gain.
+  is read-only, and server-rendering + SSE serve it well. The clean seam is
+  authoring (stateful, client-reactive) vs. observation (streaming,
+  server-rendered). An SPA would rebuild the moat for no user gain.
 - **Buildless** keeps the shipped identity (README/PRODUCT.md: "single static
   binary, no build step beyond `templ generate`") and keeps the upcoming M5
   goreleaser pipeline simple. Vue officially supports both CDN/importmap and
@@ -42,10 +42,13 @@ and the single static binary is preserved.
 
 ## Consequences
 
-- `alpine.min.js` is removed; **htmx stays** for the observation surface. The
-  cross-surface seam reuses the existing `HX-Trigger` → `CustomEvent` bus: the Vue
-  island subscribes on `document.body` (e.g. `mock:seed-rule`, `mock:edit-rule`)
-  rather than introducing a new transport.
+- **Both `alpine.min.js` and `htmx.min.js` are removed.** Implementation showed
+  htmx had no job left: the journal streams over a native `EventSource`, and its
+  jump-to-rule / rule-from-request links became native clicks. The observation
+  surface is now server-rendered Templ + native SSE. The cross-surface seam is
+  plain DOM `CustomEvent`s on `document.body` (`mock:edit-rule`, `mock:seed-from`,
+  …) — the same bus `app.js` already used, no new transport. (The ADR first
+  planned to keep htmx; this is the honest as-built refinement.)
 - Matcher, `text/template` render, dry-run, and probe **stay server-side** (Go
   owns them); the Vue app orchestrates them over JSON and renders results. No
   matcher/template logic is duplicated in JS.
