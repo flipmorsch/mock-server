@@ -29,7 +29,7 @@ live-journal + near-miss-explanation moat into more value, not dilute it.
 - **Reopening settled decisions:** YAML-configured TLS (ADR-0005), multi-file
   Save ownership (ADR-0002), format-preserving Save (ADR-0002).
 
-## v1.0.1 — Hardening (ship first) · S
+## v1.0.1 — Hardening · ✅ shipped in v1.0.1
 
 Two live issues found while planning:
 - **Count unsoundness (bug).** `requestCount` and `/__admin/requests/count` both
@@ -44,9 +44,11 @@ Two live issues found while planning:
 
 ## Milestones
 
-### M1 — Go library / embeddable form · M · (primary surface)
+### M1 — Go library / embeddable form · ✅ shipped in v1.1.0
 The in-process answer makes this the headline. The reframed journal substrate is
-folded in, because the library is its main consumer.
+folded in, because the library is its main consumer. Delivered: module rename,
+`mock` package (`Start`/`URL`/`Close`/`Reset`/`Received`/`Count`/`Verify*`),
+response capture, and JSON subset body matching. **Next milestone: M2.**
 - **Module-path rename** `mock-server` → `github.com/flipmorsch/mock-server`
   (unblocks `import` and `go install`; safe now, no external importers).
 - **Shallow, stable API** promoted out of `internal/`:
