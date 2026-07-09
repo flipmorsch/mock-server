@@ -30,7 +30,7 @@ A Rule's response specifies an HTTP status code, optional headers, and a body (i
 A Rule may include a `delay` field (e.g. `500ms`, `2s`) to simulate network latency. The server sleeps for the specified duration before writing the response.
 
 ### Dynamic Responses
-A Rule with `template: true` processes its body through Go's `text/template`. Available data: `{{.Method}}`, `{{.Path}}`, `{{.Body}}`, `{{.Header "X"}}`, `{{.Query "k"}}`. Custom functions: `now`, `nowFormat`, `randomInt`, `randomString`, `counter`. Without the template flag, the body is served as a literal string.
+A Rule with `template: true` processes its body through Go's `text/template`. Available data: `{{.Method}}`, `{{.Path}}`, `{{.Body}}`, `{{.Header "X"}}`, `{{.Query "k"}}`. Custom functions: `now`, `nowFormat`, `randomInt`, `randomString`, `counter`, `requestCount` (how many recorded requests match an optional method/path — sound beyond the Journal's retained window). Without the template flag, the body is served as a literal string.
 
 ### Unmatched Requests
 Requests matching no Rule receive HTTP 404 with no body. Users can simulate a default response by placing a Rule with no match criteria at the end of their Rule list.
@@ -53,7 +53,7 @@ Two test modes per Rule:
 - **Probe** — sends a real HTTP request to the mock server's own listener and displays the mock response (or 404 if the Rule doesn't match).
 
 ### Request Journal
-A live log of recent HTTP requests visible in the UI, stored as an in-memory ring buffer of the last 200 requests. Updates in real-time. No persistence.
+A live log of recent HTTP requests visible in the UI, stored as an in-memory ring buffer of the last 200 requests. Updates in real-time. No persistence. Sensitive request headers (`Authorization`, `Cookie`, API keys) are redacted. Request counts are tracked with monotonic tallies, so they stay accurate beyond the 200-entry display window.
 
 ### Match Explanation
 A per-request diagnostic answering "why did this request get this response." For an unmatched request, it shows the Rules that came closest to matching, ranked by closeness, each with the exact match dimension that failed (expected vs. actual value). For a matched request, it identifies the winning Rule; the verdicts of earlier skipped Rules are available on demand (diagnosing an early broad Rule shadowing a later specific one under first-match-wins). Explanations appear on Journal entries and in dry-run results.

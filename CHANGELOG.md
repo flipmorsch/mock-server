@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- **Fix:** request counts (`requestCount` template func and `/__admin/requests/count`) were capped by the 200-entry journal ring buffer and silently undercounted past 200 requests. Total / method / exact-path counts are now sound via monotonic tallies, independent of the display window.
+- **Security:** sensitive request headers (`Authorization`, `Cookie`, API keys) are redacted in the journal and `/__admin/` API; the server warns at startup when binding to a non-loopback address, since the journal and admin API are unauthenticated.
+
 ## 1.0.0
 
 - **TLS** — `--tls` serves HTTPS with an auto-generated self-signed certificate (SHA-256 fingerprint logged at startup), or `--tls-cert`/`--tls-key` for a provided pair. Single HTTP-or-HTTPS listener; HTTP/2 via ALPN. See ADR-0005.

@@ -37,21 +37,67 @@ type Journal struct {
 	seq     int64
 	subs    map[int]chan JournalEntry
 	nextSub int
+
+	// Monotonic request tallies, independent of the display ring buffer, so
+	// counts stay sound past maxEntries. Keyed for the aggregations that
+	// requestCount and /__admin/requests/count expose (total, method, path).
+	countTotal      int64
+	countMethod     map[string]int64 // key: upper(method)
+	countPath       map[string]int64 // key: exact path
+	countMethodPath map[string]int64 // key: upper(method) + "\x00" + path
 }
 
 func NewJournal() *Journal {
-	return &Journal{subs: make(map[int]chan JournalEntry)}
+	return &Journal{
+		subs:            make(map[int]chan JournalEntry),
+		countMethod:     make(map[string]int64),
+		countPath:       make(map[string]int64),
+		countMethodPath: make(map[string]int64),
+	}
+}
+
+var sensitiveHeaders = map[string]bool{
+	"Authorization":       true,
+	"Proxy-Authorization": true,
+	"Cookie":              true,
+	"Set-Cookie":          true,
+	"X-Api-Key":           true,
+	"X-Auth-Token":        true,
+}
+
+// redactHeaders replaces sensitive header values so secrets never land in the
+// journal or the /__admin/ API. Returns a new map; nil in, nil out.
+func redactHeaders(h map[string]string) map[string]string {
+	if h == nil {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		if sensitiveHeaders[http.CanonicalHeaderKey(k)] {
+			out[k] = "[REDACTED]"
+		} else {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func (j *Journal) Record(e JournalEntry) {
 	if len(e.Body) > maxBodyRecord {
 		e.Body = e.Body[:maxBodyRecord]
 	}
+	e.Headers = redactHeaders(e.Headers)
 	e.Timestamp = time.Now()
 
 	j.mu.Lock()
 	j.seq++
 	e.Seq = j.seq
+
+	m := strings.ToUpper(e.Method)
+	j.countTotal++
+	j.countMethod[m]++
+	j.countPath[e.Path]++
+	j.countMethodPath[m+"\x00"+e.Path]++
 	// ponytail: ring buffer via slice shift; O(n) is nothing at cap 200
 	if len(j.entries) >= maxEntries {
 		copy(j.entries, j.entries[1:])
@@ -88,6 +134,10 @@ func (j *Journal) Subscribe() (<-chan JournalEntry, func()) {
 func (j *Journal) Clear() {
 	j.mu.Lock()
 	j.entries = nil
+	j.countTotal = 0
+	j.countMethod = make(map[string]int64)
+	j.countPath = make(map[string]int64)
+	j.countMethodPath = make(map[string]int64)
 	j.mu.Unlock()
 }
 
@@ -122,8 +172,31 @@ func (j *Journal) Entries(filter *rule.RequestFilter) []JournalEntry {
 	return result
 }
 
-func (j *Journal) Count(filter *rule.RequestFilter) int {
-	return len(j.Entries(filter))
+// Count returns how many recorded requests match the filter. Total / method /
+// exact-path filters use monotonic tallies, so they stay sound regardless of the
+// display ring buffer. Richer filters (headers, query, body, prefix/regex path)
+// can't be pre-aggregated and are scoped to the retained window (last maxEntries).
+func (j *Journal) Count(f *rule.RequestFilter) int {
+	if f != nil && (len(f.Headers) > 0 || len(f.Query) > 0 || f.Body != "" ||
+		(f.PathMode != "" && f.PathMode != "exact")) {
+		return len(j.Entries(f)) // window-scoped; Entries takes the lock itself
+	}
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	if f == nil {
+		return int(j.countTotal)
+	}
+	m := strings.ToUpper(f.Method)
+	switch {
+	case f.Method == "" && f.Path == "":
+		return int(j.countTotal)
+	case f.Path == "":
+		return int(j.countMethod[m])
+	case f.Method == "":
+		return int(j.countPath[f.Path])
+	default:
+		return int(j.countMethodPath[m+"\x00"+f.Path])
+	}
 }
 
 func requestFilterIsEmpty(f *rule.RequestFilter) bool {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,7 +19,7 @@ import (
 	"mock-server/internal/ui"
 )
 
-const version = "1.0.0"
+const version = "1.0.1"
 
 func main() {
 	listenOverride := flag.String("listen", "", "override listen address (e.g., 127.0.0.1:8080)")
@@ -72,6 +73,10 @@ func main() {
 	tlsEnabled := *tlsFlag || *tlsCert != ""
 	srv.SetTLSEnabled(tlsEnabled)
 
+	if host, _, err := net.SplitHostPort(addr); err == nil && !isLoopback(host) {
+		log.Printf("warning: %s is not a loopback address — the request journal and /__admin/ API are unauthenticated and expose captured request data (sensitive headers redacted); prefer 127.0.0.1 or front it with an auth proxy", addr)
+	}
+
 	h := &handler{srv: srv}
 
 	// Hot reload is headless-only (ADR-0004): under --ui the working copy owns
@@ -114,6 +119,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "server error: %v\n", serveErr)
 		os.Exit(1)
 	}
+}
+
+// isLoopback reports whether host is a loopback address (or empty/all-interfaces
+// counts as non-loopback, since that's the exposure case worth warning about).
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // watchReload reloads the rule set from disk on SIGHUP. SIGHUP is never
