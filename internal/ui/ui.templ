@@ -213,7 +213,7 @@ func editorURL(rv rule.RuleVerdict) string {
 // Shell
 // ---------------------------------------------------------------
 
-templ Shell(rules []rule.Rule, unsaved bool, entries []server.JournalEntry) {
+templ Shell(entries []server.JournalEntry) {
 	<!DOCTYPE html>
 	<html lang="en">
 		<head>
@@ -221,17 +221,17 @@ templ Shell(rules []rule.Rule, unsaved bool, entries []server.JournalEntry) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>mock/server</title>
 			<link rel="stylesheet" href="/_ui/static/app.css"/>
-			<script src="/_ui/static/htmx.min.js"></script>
+			@templ.Raw(`<script type="importmap">{"imports":{"vue":"/_ui/static/vue.esm-browser.prod.js"}}</script>`)
 			<script src="/_ui/static/app.js" defer="defer"></script>
-			<script src="/_ui/static/alpine.min.js" defer="defer"></script>
+			<script type="module" src="/_ui/static/authoring.js"></script>
 		</head>
 		<body>
 			<div class="workspace" id="workspace">
-				@Rail(rules, unsaved)
+				<aside class="rail" id="rail-root"></aside>
 				<section class="journal-pane" id="journal-pane">
 					@JournalPanel(entries)
 				</section>
-				<section class="editor-pane" id="editor-pane"></section>
+				<section class="editor-pane" id="editor-root"></section>
 			</div>
 			@Palette()
 			<div class="toasts" id="toasts"></div>
@@ -478,9 +478,7 @@ templ Explanation(e server.JournalEntry) {
 			<a
 				class="vrule"
 				href="#"
-				hx-get={ "/_ui/partials/rule-editor/" + e.MatchedID }
-				hx-target="#editor-pane"
-				hx-swap="innerHTML"
+				data-rule-id={ e.MatchedID }
 			>{ matchedLabel(e.Matched) }</a>
 			<span class="vok">✓ all criteria matched</span>
 		</div>
@@ -502,10 +500,8 @@ templ Explanation(e server.JournalEntry) {
 			<div class="dim">no rule came close — nothing shares this method or path</div>
 		}
 		<button
-			class="btn btn-accent"
-			hx-get={ "/_ui/partials/new-rule?from=" + strconv.FormatInt(e.Seq, 10) }
-			hx-target="#editor-pane"
-			hx-swap="innerHTML"
+			class="btn btn-accent rule-from-req"
+			data-seq={ strconv.FormatInt(e.Seq, 10) }
 		>+ create rule from this request</button>
 	}
 }
@@ -515,9 +511,8 @@ templ VerdictBlock(rv rule.RuleVerdict) {
 		<a
 			class="vrule"
 			href="#"
-			hx-get={ editorURL(rv) }
-			hx-target="#editor-pane"
-			hx-swap="innerHTML"
+			data-rule-id={ rv.RuleID }
+			data-field={ firstFail(rv) }
 			title="open rule, highlight the failing criterion (E)"
 		>
 			if rv.RuleName != "" {

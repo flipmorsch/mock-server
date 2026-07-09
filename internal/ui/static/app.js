@@ -1,440 +1,279 @@
-// mock/server console — SSE stream, keyboard map, command palette.
+// mock/server console — observation surface (ADR-0009): SSE stream, journal
+// filter/keyboard, command palette. The authoring surface is the Vue island
+// (authoring.js); this talks to it only through document.body CustomEvents.
 
-// ---- Alpine component factories --------------------------------------------
+const $ = (sel, root) => (root || document).querySelector(sel)
+const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel))
 
-function kvList(prefix, items) {
-  return { prefix: prefix, items: items };
-}
+const emit = (name, detail) => document.body.dispatchEvent(new CustomEvent(name, { detail, bubbles: true }))
 
-// respEditor drives the Response tab: a single response (flat form) until a
-// second is added, then an editable sequence list. State serializes to the
-// hidden `responses` JSON field; `resp_mode` tells the server which to read.
-// See ADR-0008.
-function respEditor(initial) {
-  return {
-    mode: initial.mode,
-    responses: initial.responses,
-    _nid: initial.responses.length,
-    nextId() { return this._nid++; },
-    blank() {
-      return { _id: this.nextId(), status: '200', delay: '', template: false, body: '', bodyFile: '', headers: [] };
-    },
-    // Snapshot the flat single-response form from the live DOM, so an in-progress
-    // edit survives the single -> sequence conversion.
-    readFlat() {
-      const form = this.$root.closest('form');
-      const val = (n) => { const el = form.querySelector('.form-section-resp [name="' + n + '"]'); return el ? el.value : ''; };
-      const headers = [];
-      const ks = form.querySelectorAll('.form-section-resp [name="resph_k"]');
-      const vs = form.querySelectorAll('.form-section-resp [name="resph_v"]');
-      ks.forEach((k, i) => { if (k.value) headers.push({ k: k.value, v: vs[i] ? vs[i].value : '' }); });
-      const tpl = form.querySelector('.form-section-resp [name="template"]');
-      return { _id: this.nextId(), status: val('status') || '200', delay: val('delay'),
-        template: tpl ? tpl.checked : false, body: val('body'), bodyFile: val('body_file'), headers: headers };
-    },
-    addResponse() {
-      if (this.mode === 'single') {
-        this.responses = [this.readFlat(), this.blank()];
-        this.mode = 'sequence';
-      } else {
-        this.responses.push(this.blank());
-      }
-      this.$nextTick(() => {
-        const items = this.$root.querySelectorAll('.seq-item');
-        const last = items[items.length - 1];
-        if (last) { const inp = last.querySelector('input'); if (inp) inp.focus(); }
-      });
-    },
-    removeResponse(i) { this.responses.splice(i, 1); },
-    moveUp(i) { if (i > 0) { const a = this.responses; const t = a[i - 1]; a[i - 1] = a[i]; a[i] = t; } },
-    moveDown(i) { const a = this.responses; if (i < a.length - 1) { const t = a[i + 1]; a[i + 1] = a[i]; a[i] = t; } },
-    // Serialize to the wire shape (json tags on rule.Response): status numeric,
-    // headers as an object, body_file key; empties omitted.
-    serialized() {
-      return JSON.stringify(this.responses.map((r) => {
-        const o = { status: parseInt(r.status, 10) || 0 };
-        if (r.delay) o.delay = r.delay;
-        if (r.template) o.template = true;
-        if (r.body) o.body = r.body;
-        if (r.bodyFile) o.body_file = r.bodyFile;
-        const hs = {};
-        (r.headers || []).forEach((h) => { if (h.k) hs[h.k] = h.v; });
-        if (Object.keys(hs).length) o.headers = hs;
-        return o;
-      }));
-    },
-    statusClass(s) { return 'status status-' + Math.floor((parseInt(s, 10) || 0) / 100) + 'xx'; },
-    preview(s) { s = (s || '').replace(/\s+/g, ' ').trim(); return s.length > 60 ? s.slice(0, 60) + '…' : s; },
-  };
-}
-
-// ---- helpers -----------------------------------------------------------------
-
-const $ = (sel, root) => (root || document).querySelector(sel);
-const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+// ---- toasts -------------------------------------------------------------------
 
 function showToast(msg, type) {
-  const t = document.createElement('div');
-  t.className = 'toast toast-' + (type || 'success');
-  t.textContent = msg;
-  $('#toasts').appendChild(t);
-  setTimeout(() => t.remove(), 2600);
+  const t = document.createElement('div')
+  t.className = 'toast toast-' + (type || 'success')
+  t.textContent = msg
+  $('#toasts').appendChild(t)
+  setTimeout(() => t.remove(), 2600)
 }
+document.body.addEventListener('toast', (e) => showToast(e.detail.msg, e.detail.type))
 
-// ---- editor pane state --------------------------------------------------------
-
-function editorOpen() {
-  return $('#editor-pane').children.length > 0;
-}
-
-function syncEditingClass() {
-  document.body.classList.toggle('editing', editorOpen());
-}
-
-function closeEditor() {
-  $('#editor-pane').innerHTML = '';
-  $$('.rail-item.active').forEach(el => el.classList.remove('active'));
-  syncEditingClass();
-}
-
-document.addEventListener('htmx:afterSwap', (e) => {
-  if (e.detail.target.id === 'editor-pane' || e.detail.target.id === 'editor') syncEditingClass();
-  if (window.Alpine) { window.Alpine.initTree(e.detail.target); }
-});
+// ---- journal -> island seam (jump-to-rule, rule-from-request) ------------------
 
 document.addEventListener('click', (e) => {
-  if (e.target.closest('#editor-close')) closeEditor();
-  const item = e.target.closest('.rail-item');
-  if (item) {
-    $$('.rail-item.active').forEach(el => el.classList.remove('active'));
-    item.classList.add('active');
+  const jump = e.target.closest('.vrule')
+  if (jump) {
+    e.preventDefault()
+    emit('mock:edit-rule', { id: jump.dataset.ruleId, field: jump.dataset.field || '' })
+    return
   }
-});
+  const seed = e.target.closest('.rule-from-req')
+  if (seed) {
+    e.preventDefault()
+    emit('mock:seed-from', { seq: seed.dataset.seq })
+  }
+})
 
-document.body.addEventListener('editor-closed', closeEditor);
+// ---- journal: filter, pause, clear, SSE ---------------------------------------
 
-// ---- unsaved flag + beforeunload -----------------------------------------------
-
-let unsaved = false;
-document.body.addEventListener('unsaved', (e) => { unsaved = !!e.detail.value; });
-window.addEventListener('beforeunload', (e) => {
-  if (unsaved) { e.preventDefault(); e.returnValue = ''; }
-});
-
-document.body.addEventListener('toast', (e) => showToast(e.detail.msg, e.detail.type));
-
-// ---- journal: filter, pause, clear, SSE ------------------------------------------
-
-let paused = false;
-const pauseBuffer = [];
-const MAX_ROWS = 200;
+let paused = false
+const pauseBuffer = []
+const MAX_ROWS = 200
 
 function filterTerms() {
-  const f = $('#jfilter');
-  return f && f.value ? f.value.toLowerCase().split(/\s+/).filter(Boolean) : [];
+  const f = $('#jfilter')
+  return f && f.value ? f.value.toLowerCase().split(/\s+/).filter(Boolean) : []
 }
-
 function rowVisible(row, terms) {
-  const hay = row.dataset.hay || '';
-  return terms.every(t => hay.includes(t));
+  const hay = row.dataset.hay || ''
+  return terms.every((t) => hay.includes(t))
 }
-
 function applyFilter() {
-  const terms = filterTerms();
-  $$('#stream .jrow').forEach(row => row.classList.toggle('fhide', !rowVisible(row, terms)));
+  const terms = filterTerms()
+  $$('#stream .jrow').forEach((row) => row.classList.toggle('fhide', !rowVisible(row, terms)))
 }
-
 function updateCount() {
-  const c = $('#jcount');
-  if (c) c.textContent = $$('#stream .jrow').length;
+  const c = $('#jcount')
+  if (c) c.textContent = $$('#stream .jrow').length
 }
-
 function insertRow(html) {
-  const stream = $('#stream');
-  if (!stream) return;
-  const tpl = document.createElement('template');
-  tpl.innerHTML = html.trim();
-  const row = tpl.content.firstElementChild;
-  if (!row) return;
-  row.classList.toggle('fhide', !rowVisible(row, filterTerms()));
-  stream.prepend(row);
-  htmx.process(row);
-  const rows = $$('#stream .jrow');
-  for (let i = MAX_ROWS; i < rows.length; i++) rows[i].remove();
-  updateCount();
+  const stream = $('#stream')
+  if (!stream) return
+  const tpl = document.createElement('template')
+  tpl.innerHTML = html.trim()
+  const row = tpl.content.firstElementChild
+  if (!row) return
+  row.classList.toggle('fhide', !rowVisible(row, filterTerms()))
+  stream.prepend(row)
+  const rows = $$('#stream .jrow')
+  for (let i = MAX_ROWS; i < rows.length; i++) rows[i].remove()
+  updateCount()
 }
-
 function connectStream() {
-  const es = new EventSource('/_ui/api/events');
-  es.onopen = () => $('#live-dot') && $('#live-dot').classList.add('on');
-  es.onerror = () => $('#live-dot') && $('#live-dot').classList.remove('on');
+  const es = new EventSource('/_ui/api/events')
+  es.onopen = () => $('#live-dot') && $('#live-dot').classList.add('on')
+  es.onerror = () => $('#live-dot') && $('#live-dot').classList.remove('on')
   es.onmessage = (e) => {
-    if (paused) { pauseBuffer.push(e.data); return; }
-    insertRow(e.data);
-  };
+    if (paused) { pauseBuffer.push(e.data); return }
+    insertRow(e.data)
+  }
 }
-
 function togglePause() {
-  paused = !paused;
-  const btn = $('#jpause');
+  paused = !paused
+  const btn = $('#jpause')
   if (btn) {
-    btn.textContent = paused ? 'resume' : 'pause';
-    btn.classList.toggle('paused', paused);
+    btn.textContent = paused ? 'resume' : 'pause'
+    btn.classList.toggle('paused', paused)
   }
-  if (!paused) {
-    while (pauseBuffer.length) insertRow(pauseBuffer.shift());
-  }
+  if (!paused) while (pauseBuffer.length) insertRow(pauseBuffer.shift())
 }
-
 function clearJournal() {
   fetch('/__admin/requests', { method: 'DELETE' }).then(() => {
-    $$('#stream .jrow').forEach(r => r.remove());
-    pauseBuffer.length = 0;
-    updateCount();
-  });
+    $$('#stream .jrow').forEach((r) => r.remove())
+    pauseBuffer.length = 0
+    updateCount()
+  })
 }
 
 document.addEventListener('input', (e) => {
-  if (e.target.id === 'jfilter') applyFilter();
-});
+  if (e.target.id === 'jfilter') applyFilter()
+})
 document.addEventListener('click', (e) => {
-  if (e.target.id === 'jpause') togglePause();
-  if (e.target.id === 'jclear') clearJournal();
-});
+  if (e.target.id === 'jpause') togglePause()
+  if (e.target.id === 'jclear') clearJournal()
+})
 
-// ---- journal keyboard selection ---------------------------------------------------
+// ---- journal keyboard selection -----------------------------------------------
 
-function visibleRows() {
-  return $$('#stream .jrow').filter(r => !r.classList.contains('fhide'));
-}
-
-function selectedRow() {
-  return $('#stream .jrow.sel');
-}
+const visibleRows = () => $$('#stream .jrow').filter((r) => !r.classList.contains('fhide'))
+const selectedRow = () => $('#stream .jrow.sel')
 
 function moveSelection(delta) {
-  const rows = visibleRows();
-  if (!rows.length) return;
-  const cur = selectedRow();
-  let idx = cur ? rows.indexOf(cur) + delta : (delta > 0 ? 0 : rows.length - 1);
-  idx = Math.max(0, Math.min(rows.length - 1, idx));
-  if (cur) cur.classList.remove('sel');
-  rows[idx].classList.add('sel');
-  rows[idx].scrollIntoView({ block: 'nearest' });
+  const rows = visibleRows()
+  if (!rows.length) return
+  const cur = selectedRow()
+  let idx = cur ? rows.indexOf(cur) + delta : delta > 0 ? 0 : rows.length - 1
+  idx = Math.max(0, Math.min(rows.length - 1, idx))
+  if (cur) cur.classList.remove('sel')
+  rows[idx].classList.add('sel')
+  rows[idx].scrollIntoView({ block: 'nearest' })
 }
 
-// ---- command palette -----------------------------------------------------------------
+// ---- command palette ----------------------------------------------------------
 
 const paletteActions = [
-  { label: 'new rule', hint: '^N', run: () => htmx.ajax('GET', '/_ui/partials/new-rule', { target: '#editor-pane', swap: 'innerHTML' }) },
-  { label: 'save to disk', hint: '^S', run: () => htmx.ajax('POST', '/_ui/api/save', { swap: 'none' }) },
-  { label: 'settings', hint: '', run: () => htmx.ajax('GET', '/_ui/partials/settings', { target: '#editor-pane', swap: 'innerHTML' }) },
+  { label: 'new rule', hint: '^N', run: () => emit('mock:new-rule') },
+  { label: 'save to disk', hint: '^S', run: () => emit('mock:save') },
+  { label: 'settings', hint: '', run: () => emit('mock:settings') },
   { label: 'clear journal', hint: '', run: clearJournal },
   { label: 'pause / resume stream', hint: '', run: togglePause },
   { label: 'focus filter', hint: '/', run: () => $('#jfilter') && $('#jfilter').focus() },
-  { label: 'close editor', hint: 'esc', run: closeEditor },
-];
+]
 
-let palSel = 0;
-let palItems = [];
+let palSel = 0
+let palItems = []
 
 function paletteItems() {
-  const rules = $$('.rail-item').map(el => ({
+  const rules = $$('.rail-item').map((el) => ({
     label: (el.dataset.name || '(unnamed)') + '  ' + el.dataset.path,
     method: el.dataset.method,
     hint: 'open rule',
-    run: () => htmx.ajax('GET', '/_ui/partials/rule-editor/' + el.dataset.id, { target: '#editor-pane', swap: 'innerHTML' }),
-  }));
-  return rules.concat(paletteActions);
+    run: () => emit('mock:edit-rule', { id: el.dataset.id }),
+  }))
+  return rules.concat(paletteActions)
 }
 
 // Subsequence fuzzy match; lower score = better (earlier, tighter match).
 function fuzzy(q, s) {
-  s = s.toLowerCase();
-  let score = 0, pos = -1;
+  s = s.toLowerCase()
+  let score = 0, pos = -1
   for (const ch of q) {
-    pos = s.indexOf(ch, pos + 1);
-    if (pos === -1) return -1;
-    score += pos;
+    pos = s.indexOf(ch, pos + 1)
+    if (pos === -1) return -1
+    score += pos
   }
-  return score;
+  return score
 }
 
-function paletteOpen() {
-  return !$('#palette').hidden;
-}
+const paletteOpen = () => !$('#palette').hidden
 
 function renderPalette() {
-  const q = $('#palette-input').value.trim().toLowerCase();
-  let items = paletteItems();
+  const q = $('#palette-input').value.trim().toLowerCase()
+  let items = paletteItems()
   if (q) {
     items = items
-      .map(it => ({ it, score: fuzzy(q, it.label) }))
-      .filter(x => x.score >= 0)
+      .map((it) => ({ it, score: fuzzy(q, it.label) }))
+      .filter((x) => x.score >= 0)
       .sort((a, b) => a.score - b.score)
-      .map(x => x.it);
+      .map((x) => x.it)
   }
-  palItems = items.slice(0, 12);
-  palSel = Math.max(0, Math.min(palSel, palItems.length - 1));
-  const box = $('#palette-results');
-  box.innerHTML = '';
+  palItems = items.slice(0, 12)
+  palSel = Math.max(0, Math.min(palSel, palItems.length - 1))
+  const box = $('#palette-results')
+  box.innerHTML = ''
   if (!palItems.length) {
-    box.innerHTML = '<div class="palette-empty">nothing matches</div>';
-    return;
+    box.innerHTML = '<div class="palette-empty">nothing matches</div>'
+    return
   }
   palItems.forEach((it, i) => {
-    const el = document.createElement('div');
-    el.className = 'palette-item' + (i === palSel ? ' sel' : '');
+    const el = document.createElement('div')
+    el.className = 'palette-item' + (i === palSel ? ' sel' : '')
     if (it.method) {
-      const m = document.createElement('span');
-      m.className = 'method method-' + it.method.toUpperCase();
-      m.textContent = it.method.toUpperCase();
-      el.appendChild(m);
+      const m = document.createElement('span')
+      m.className = 'method method-' + it.method.toUpperCase()
+      m.textContent = it.method.toUpperCase()
+      el.appendChild(m)
     }
-    const label = document.createElement('span');
-    label.className = 'palette-item-label';
-    label.textContent = it.label;
-    el.appendChild(label);
+    const label = document.createElement('span')
+    label.className = 'palette-item-label'
+    label.textContent = it.label
+    el.appendChild(label)
     if (it.hint) {
-      const hint = document.createElement('span');
-      hint.className = 'palette-item-hint';
-      hint.textContent = it.hint;
-      el.appendChild(hint);
+      const hint = document.createElement('span')
+      hint.className = 'palette-item-hint'
+      hint.textContent = it.hint
+      el.appendChild(hint)
     }
-    el.addEventListener('click', () => { hidePalette(); it.run(); });
-    box.appendChild(el);
-  });
+    el.addEventListener('click', () => { hidePalette(); it.run() })
+    box.appendChild(el)
+  })
 }
 
 function showPalette() {
-  palSel = 0;
-  const p = $('#palette');
-  p.hidden = false;
-  const input = $('#palette-input');
-  input.value = '';
-  renderPalette();
-  input.focus();
+  palSel = 0
+  $('#palette').hidden = false
+  const input = $('#palette-input')
+  input.value = ''
+  renderPalette()
+  input.focus()
 }
-
-function hidePalette() {
-  $('#palette').hidden = true;
-}
-
+const hidePalette = () => { $('#palette').hidden = true }
 function paletteExec() {
-  const it = palItems[palSel];
-  hidePalette();
-  if (it) it.run();
+  const it = palItems[palSel]
+  hidePalette()
+  if (it) it.run()
 }
 
 document.addEventListener('input', (e) => {
-  if (e.target.id === 'palette-input') { palSel = 0; renderPalette(); }
-});
-
+  if (e.target.id === 'palette-input') { palSel = 0; renderPalette() }
+})
 document.addEventListener('click', (e) => {
-  if (e.target.id === 'palette') hidePalette();
-});
+  if (e.target.id === 'palette') hidePalette()
+})
 
-// ---- global keyboard map ---------------------------------------------------------------
+// ---- global keyboard map ------------------------------------------------------
 
 document.addEventListener('keydown', (e) => {
-  const mod = e.ctrlKey || e.metaKey;
+  const mod = e.ctrlKey || e.metaKey
 
   if (paletteOpen()) {
-    if (e.key === 'Escape') { e.preventDefault(); hidePalette(); }
-    if (e.key === 'ArrowDown') { e.preventDefault(); palSel++; renderPalette(); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); palSel = Math.max(0, palSel - 1); renderPalette(); }
-    if (e.key === 'Enter') { e.preventDefault(); paletteExec(); }
-    return;
+    if (e.key === 'Escape') { e.preventDefault(); hidePalette() }
+    if (e.key === 'ArrowDown') { e.preventDefault(); palSel++; renderPalette() }
+    if (e.key === 'ArrowUp') { e.preventDefault(); palSel = Math.max(0, palSel - 1); renderPalette() }
+    if (e.key === 'Enter') { e.preventDefault(); paletteExec() }
+    return
   }
 
-  if (mod && e.key === 'k') { e.preventDefault(); showPalette(); return; }
-  if (mod && e.key === 's') { e.preventDefault(); htmx.ajax('POST', '/_ui/api/save', { swap: 'none' }); return; }
-  if (mod && e.key === 'n') { e.preventDefault(); htmx.ajax('GET', '/_ui/partials/new-rule', { target: '#editor-pane', swap: 'innerHTML' }); return; }
+  if (mod && e.key === 'k') { e.preventDefault(); showPalette(); return }
+  if (mod && e.key === 's') { e.preventDefault(); emit('mock:save'); return }
+  if (mod && e.key === 'n') { e.preventDefault(); emit('mock:new-rule'); return }
 
-  const inField = e.target.closest('input, textarea, select');
+  const inField = e.target.closest('input, textarea, select')
   if (e.key === 'Escape') {
-    if (inField) { e.target.blur(); return; }
-    closeEditor();
-    return;
+    if (inField) { e.target.blur(); return }
+    emit('mock:close-editor')
+    return
   }
-  if (inField) return;
+  if (inField) return
 
   switch (e.key) {
     case '/':
-      e.preventDefault();
-      if ($('#jfilter')) $('#jfilter').focus();
-      break;
+      e.preventDefault()
+      if ($('#jfilter')) $('#jfilter').focus()
+      break
     case 'j':
-      moveSelection(1);
-      break;
+      moveSelection(1)
+      break
     case 'k':
-      moveSelection(-1);
-      break;
+      moveSelection(-1)
+      break
     case 'Enter': {
-      const row = selectedRow();
-      if (row) { e.preventDefault(); row.open = !row.open; }
-      break;
+      const row = selectedRow()
+      if (row) { e.preventDefault(); row.open = !row.open }
+      break
     }
     case 'e': {
-      const row = selectedRow();
+      const row = selectedRow()
       if (row) {
-        const link = $('.vrule', row);
-        if (link) { row.open = true; link.click(); }
+        const link = $('.vrule', row)
+        if (link) { row.open = true; emit('mock:edit-rule', { id: link.dataset.ruleId, field: link.dataset.field || '' }) }
       }
-      break;
+      break
     }
   }
-});
+})
 
-// ---- rail drag & drop reorder --------------------------------------------------------------
+// ---- boot ---------------------------------------------------------------------
 
-let dragged = null;
-
-document.addEventListener('dragstart', (e) => {
-  const item = e.target.closest('.rail-item');
-  if (!item) return;
-  dragged = item;
-  item.classList.add('dragging');
-});
-
-document.addEventListener('dragover', (e) => {
-  const item = e.target.closest('.rail-item');
-  if (!item || !dragged || item === dragged) return;
-  e.preventDefault();
-  $$('.rail-item.drag-over').forEach(el => el.classList.remove('drag-over'));
-  item.classList.add('drag-over');
-});
-
-document.addEventListener('drop', (e) => {
-  const target = e.target.closest('.rail-item');
-  if (!target || !dragged || target === dragged) return;
-  e.preventDefault();
-  const list = $('#rail-list');
-  const items = $$('.rail-item', list);
-  if (items.indexOf(dragged) < items.indexOf(target)) {
-    target.after(dragged);
-  } else {
-    target.before(dragged);
-  }
-  const ids = $$('.rail-item', list).map(el => el.dataset.id);
-  fetch('/_ui/api/rules/reorder', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(ids),
-  }).then((resp) => {
-    if (resp.ok) {
-      unsaved = true;
-      document.body.dispatchEvent(new CustomEvent('rail-refresh', { bubbles: true }));
-    }
-  });
-});
-
-document.addEventListener('dragend', () => {
-  $$('.rail-item').forEach(el => el.classList.remove('dragging', 'drag-over'));
-  dragged = null;
-});
-
-// ---- boot ------------------------------------------------------------------------------------
-
-connectStream();
-updateCount();
+connectStream()
+updateCount()

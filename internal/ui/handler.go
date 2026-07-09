@@ -30,7 +30,7 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 
 	mux.HandleFunc("GET /_ui/{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		Shell(srv.WorkingCopy(), srv.HasUnsaved(), srv.Journal().Entries(nil)).Render(r.Context(), w)
+		Shell(srv.Journal().Entries(nil)).Render(r.Context(), w)
 	})
 
 	// ---- live journal stream -------------------------------------------
@@ -180,50 +180,81 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 		}
 	})
 
-	// ---- testing ---------------------------------------------------------
+	// ---- testing (JSON; the island orchestrates, Go engines compute) --------
 
 	mux.HandleFunc("POST /_ui/api/test-dry", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		rl, err := ruleFromForm(r)
-		if err != nil {
-			TestError("invalid rule: "+err.Error()).Render(r.Context(), w)
+		w.Header().Set("Content-Type", "application/json")
+		var req struct {
+			Rule  rule.Rule `json:"rule"`
+			Probe probeJSON `json:"probe"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		probe := decodeProbeRequest(r)
-		req, err := http.NewRequest(probe.Method, probe.Path, strings.NewReader(probe.Body))
+		probe := req.Probe.toRequest()
+		hreq, err := http.NewRequest(probe.Method, probe.Path, strings.NewReader(probe.Body))
 		if err != nil {
-			TestError("invalid probe request: "+err.Error()).Render(r.Context(), w)
+			writeJSONErr(w, http.StatusBadRequest, "invalid probe request: "+err.Error())
 			return
 		}
 		for k, v := range probe.Headers {
-			req.Header.Set(k, v)
+			hreq.Header.Set(k, v)
 		}
-		rv := rule.Explain(&rl, req, []byte(probe.Body))
-		DryRunResult(rv).Render(r.Context(), w)
+		json.NewEncoder(w).Encode(rule.Explain(&req.Rule, hreq, []byte(probe.Body)))
 	})
 
 	mux.HandleFunc("POST /_ui/api/test-probe", func(w http.ResponseWriter, r *http.Request) {
-		probe := decodeProbeRequest(r)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		resp, err := sendProbe(srv.ListenAddr(), srv.TLSEnabled(), probe)
-		if err != nil {
-			TestError("probe failed: "+err.Error()).Render(r.Context(), w)
+		w.Header().Set("Content-Type", "application/json")
+		var p probeJSON
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		ProbeResultView(*resp).Render(r.Context(), w)
+		resp, err := sendProbe(srv.ListenAddr(), srv.TLSEnabled(), p.toRequest())
+		if err != nil {
+			writeJSONErr(w, http.StatusBadGateway, "probe failed: "+err.Error())
+			return
+		}
+		json.NewEncoder(w).Encode(resp)
 	})
 
 	mux.HandleFunc("POST /_ui/api/template-preview", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		probe := decodeProbeRequest(r)
-		params := rule.PathParams(r.FormValue("path_mode"), r.FormValue("path"), probe.Path)
-		result, err := executePreview(r.FormValue("body"), probe, params)
-		if err != nil {
-			TestError("template error: "+err.Error()).Render(r.Context(), w)
+		w.Header().Set("Content-Type", "application/json")
+		var req struct {
+			TplBody      string    `json:"tpl_body"`
+			RulePathMode string    `json:"rule_path_mode"`
+			RulePath     string    `json:"rule_path"`
+			Probe        probeJSON `json:"probe"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		TemplatePreview(result).Render(r.Context(), w)
+		probe := req.Probe.toRequest()
+		params := rule.PathParams(req.RulePathMode, req.RulePath, probe.Path)
+		out, err := executePreview(req.TplBody, probe, params)
+		if err != nil {
+			writeJSONErr(w, http.StatusUnprocessableEntity, "template error: "+err.Error())
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"output": out})
+	})
+
+	// rule-from-request: the server builds the pre-filled rule; the island seeds it.
+	mux.HandleFunc("GET /_ui/api/rule-from-entry", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		seq, err := strconv.ParseInt(r.URL.Query().Get("seq"), 10, 64)
+		if err != nil {
+			writeJSONErr(w, http.StatusBadRequest, "invalid seq")
+			return
+		}
+		e, ok := srv.Journal().Find(seq)
+		if !ok {
+			writeJSONErr(w, http.StatusNotFound, "journal entry not found")
+			return
+		}
+		json.NewEncoder(w).Encode(ruleFromEntry(e))
 	})
 
 	// ---- partials --------------------------------------------------------
@@ -410,26 +441,34 @@ type ProbeRequest struct {
 }
 
 type ProbeResult struct {
-	Status  int
-	Headers map[string]string
-	Body    string
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    string            `json:"body"`
 }
 
-func decodeProbeRequest(r *http.Request) ProbeRequest {
-	r.ParseForm()
-	p := ProbeRequest{
-		Method:  r.FormValue("probe_method"),
-		Path:    r.FormValue("probe_path"),
-		Headers: parseHeaderLines(r.FormValue("probe_headers")),
-		Body:    r.FormValue("probe_body"),
+// probeJSON is the island's test-request payload; toRequest parses the raw
+// "Key: Value" header lines (reusing parseHeaderLines) and applies defaults.
+type probeJSON struct {
+	Method     string `json:"method"`
+	Path       string `json:"path"`
+	HeaderText string `json:"headerText"`
+	Body       string `json:"body"`
+}
+
+func (p probeJSON) toRequest() ProbeRequest {
+	pr := ProbeRequest{Method: p.Method, Path: p.Path, Headers: parseHeaderLines(p.HeaderText), Body: p.Body}
+	if pr.Method == "" {
+		pr.Method = "GET"
 	}
-	if p.Method == "" {
-		p.Method = "GET"
+	if pr.Path == "" {
+		pr.Path = "/"
 	}
-	if p.Path == "" {
-		p.Path = "/"
-	}
-	return p
+	return pr
+}
+
+func writeJSONErr(w http.ResponseWriter, code int, msg string) {
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 // parseHeaderLines parses "Key: Value" lines, one header per line.
