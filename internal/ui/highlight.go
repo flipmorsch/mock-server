@@ -31,11 +31,11 @@ func highlightJSON(raw string) string {
 		switch sep {
 		case sepOpen:
 			out.WriteString("\n")
-			out.WriteString(spaces(depth * 2))
+			out.WriteString(strings.Repeat(" ", depth*2))
 		case sepValue:
 			out.WriteString(span("json-punct", ","))
 			out.WriteString("\n")
-			out.WriteString(spaces(depth * 2))
+			out.WriteString(strings.Repeat(" ", depth*2))
 		}
 	}
 	endValue := func() {
@@ -64,7 +64,7 @@ func highlightJSON(raw string) string {
 				stack = stack[:len(stack)-1]
 				if sep != sepOpen { // empty containers close on the same line
 					out.WriteString("\n")
-					out.WriteString(spaces(depth * 2))
+					out.WriteString(strings.Repeat(" ", depth*2))
 				}
 				out.WriteString(span("json-punct", string(v)))
 				endValue()
@@ -105,8 +105,4 @@ func highlightBody(body string) string {
 
 func span(cls, text string) string {
 	return fmt.Sprintf("<span class=\"%s\">%s</span>", cls, text)
-}
-
-func spaces(n int) string {
-	return strings.Repeat(" ", n)
 }

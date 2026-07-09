@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"crypto/tls"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,9 @@ import (
 	"github.com/flipmorsch/mock-server/internal/rule"
 	"github.com/flipmorsch/mock-server/internal/server"
 )
+
+//go:embed static/*
+var StaticFS embed.FS
 
 func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 	mux := http.NewServeMux()
