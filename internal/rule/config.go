@@ -99,33 +99,22 @@ func CheckRule(r Rule) error {
 	return checkResponse(r.Response)
 }
 
-var paramNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
 // checkPattern verifies a "pattern" path's {name} placeholders are well-formed:
-// every '{' opens a valid, unique {name} group and there are no stray braces. A
-// malformed brace would otherwise be escaped into a literal and silently never
-// match; a duplicate name would silently collapse to one param when captured.
+// every brace belongs to a valid, unique {name} group. A malformed brace would
+// otherwise be escaped into a literal and silently never match; a duplicate name
+// would silently collapse to one param when captured. The brace counts must equal
+// the number of valid {name} matches, which rejects stray, empty, or bad-name braces.
 func checkPattern(p string) error {
+	names := pathParamRe.FindAllStringSubmatch(p, -1)
+	if strings.Count(p, "{") != len(names) || strings.Count(p, "}") != len(names) {
+		return fmt.Errorf("malformed '{name}' placeholder in %q", p)
+	}
 	seen := map[string]bool{}
-	for i := 0; i < len(p); i++ {
-		switch p[i] {
-		case '{':
-			end := strings.IndexByte(p[i:], '}')
-			if end < 0 {
-				return fmt.Errorf("unclosed '{'")
-			}
-			name := p[i+1 : i+end]
-			if !paramNameRe.MatchString(name) {
-				return fmt.Errorf("invalid parameter name %q (letters, digits, underscore; must not start with a digit)", name)
-			}
-			if seen[name] {
-				return fmt.Errorf("duplicate parameter name %q", name)
-			}
-			seen[name] = true
-			i += end
-		case '}':
-			return fmt.Errorf("unexpected '}'")
+	for _, m := range names {
+		if seen[m[1]] {
+			return fmt.Errorf("duplicate parameter name %q", m[1])
 		}
+		seen[m[1]] = true
 	}
 	return nil
 }
