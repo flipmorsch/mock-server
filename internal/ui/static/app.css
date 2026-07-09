@@ -10,8 +10,10 @@
   --border-1: #3b4754;
   --fg: #dbe4ed;
   --fg-mut: #92a0ae;
-  --fg-dim: #5c6873;
+  --fg-dim: #7c8996; /* raised from #5c6873 to clear WCAG AA (~4.5:1) on the dark surfaces */
   --accent: #4da3ff;
+  --accent-ink: #06101c;   /* text/icon on an accent fill */
+  --accent-hover: #6cb4ff;
   --ok: #3fb950;
   --warn: #d29922;
   --err: #f85149;
@@ -27,6 +29,7 @@
   --m-other: #92a0ae;
   --mono: ui-monospace, "JetBrains Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
   --radius: 4px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out-quart */
 }
 
 * { box-sizing: border-box; }
@@ -41,6 +44,8 @@ html, body {
 }
 
 ::selection { background: var(--accent-bg); }
+
+input::placeholder, textarea::placeholder { color: var(--fg-dim); }
 
 :focus-visible {
   outline: 2px solid var(--accent);
@@ -98,16 +103,19 @@ body.editing .editor-pane {
   border-radius: var(--radius);
   padding: 3px 10px;
   cursor: pointer;
+  transition: background 0.12s var(--ease), border-color 0.12s var(--ease), color 0.12s var(--ease);
 }
 .btn:hover { background: var(--bg-3); border-color: var(--fg-dim); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled, .btn[disabled] { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
 
 .btn-accent {
   background: var(--accent);
   border-color: var(--accent);
-  color: #06101c;
+  color: var(--accent-ink);
   font-weight: 700;
 }
-.btn-accent:hover { background: #6cb4ff; border-color: #6cb4ff; }
+.btn-accent:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
 .btn-danger { color: var(--err); border-color: rgba(248, 81, 73, 0.4); background: transparent; }
 .btn-danger:hover { background: var(--err-bg); border-color: var(--err); }
@@ -653,10 +661,28 @@ body.editing .editor-pane {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
   animation: toast-in 0.18s ease-out;
 }
-.toast-success { border-left: 3px solid var(--ok); }
-.toast-error { border-left: 3px solid var(--err); }
+.toast-success {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--border-1));
+  background: color-mix(in srgb, var(--ok) 10%, var(--bg-3));
+}
+.toast-error {
+  border-color: color-mix(in srgb, var(--err) 55%, var(--border-1));
+  background: color-mix(in srgb, var(--err) 10%, var(--bg-3));
+}
 
 @keyframes toast-in {
   from { transform: translateY(8px); opacity: 0; }
   to { transform: none; opacity: 1; }
+}
+
+/* ---- reduced motion ------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .live-dot.on { animation: none; } /* keep the green "live" state, drop the pulse */
 }
