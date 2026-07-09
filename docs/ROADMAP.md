@@ -108,7 +108,7 @@ panel (architect + backend + QA) proposed independently and two of three converg
   the library layer so `/__admin/` stays frozen), and `StartT(t, yaml)`.
   **Next milestone: M4.**
 
-### M4 — Path parameters · S
+### M4 — Path parameters · ✅ shipped in v1.6.0
 The everyday REST-mock gap: match `/users/{id}` and echo the id back — impossible today
 without a rule-per-id or a hand-written regex (the deferred-backlog "no path-param
 template accessor" item, promoted).
@@ -124,6 +124,9 @@ template accessor" item, promoted).
   empty (no 500).
 - The new `path_mode` value is an **additive** schema extension — minor-version-safe, not
   a 2.0 break, consistent with how M2 added `responses:`.
+- Delivered: `path_mode: pattern` (`{name}` = one segment, unique-name validation),
+  `PathParams` extraction, `{{.Param "id"}}` (pattern + regex named captures), and
+  response header-value templating under `template: true`. **Next milestone: M5.**
 
 ### M5 — Distribution automation · S–M · deferred (was M3; owner deferred 2026-07-09)
 - goreleaser + GH Actions: multi-arch builds, checksums, Docker image, optional
