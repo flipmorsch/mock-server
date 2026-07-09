@@ -31,8 +31,9 @@ world clock," and silently rewinding a client mid-poll-loop is the worse surpris
   `POST /__admin/reset` both clear the journal *and* zero every sequence counter,
   for test isolation. `DELETE /__admin/requests` stays journal-only (unchanged
   frozen contract).
-- **The Web UI treats sequenced rules as read-only** — YAML-authored, not
-  UI-editable in this milestone. The struct round-trip preserves the field on
-  Save; a handler guard rejects edits rather than flattening the list, and a rail
-  badge marks them. Full UI editing and the named-scenario state machine are
-  deferred.
+- **The Web UI treated sequenced rules as read-only** in this milestone — the
+  struct round-trip preserved the field on Save, a handler guard rejected edits
+  rather than flattening the list, and a rail badge marked them. _Superseded:_
+  full UI editing of sequenced responses landed next; see **ADR-0008**, which
+  also closes the id-landmine noted below by assigning IDs before validation on
+  every write path. The named-scenario state machine remains deferred.

@@ -33,15 +33,18 @@ type BodyMatch struct {
 }
 
 type Response struct {
-	Status   int               `yaml:"status"`
-	Headers  map[string]string `yaml:"headers,omitempty"`
-	Body     string            `yaml:"body,omitempty"`
-	BodyFile string            `yaml:"body_file,omitempty"`
-	Delay    string            `yaml:"delay,omitempty"`
-	Template bool              `yaml:"template,omitempty"`
+	Status  int               `yaml:"status" json:"status"`
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	Body    string            `yaml:"body,omitempty" json:"body,omitempty"`
+	// json tag is explicit: encoding/json's case-fold does NOT bridge the
+	// underscore, so a `body_file` key from the UI's responses JSON would
+	// silently drop without it (see ADR-0008).
+	BodyFile string `yaml:"body_file,omitempty" json:"body_file,omitempty"`
+	Delay    string `yaml:"delay,omitempty" json:"delay,omitempty"`
+	Template bool   `yaml:"template,omitempty" json:"template,omitempty"`
 	// Derived from Delay by Validate on load and on Save's serving clone;
-	// never serialized.
-	DelayDuration time.Duration `yaml:"-"`
+	// never serialized (json:"-" blocks a spoofed value from a direct POST).
+	DelayDuration time.Duration `yaml:"-" json:"-"`
 }
 
 type RequestFilter struct {

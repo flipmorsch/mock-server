@@ -64,13 +64,17 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 	// ---- rule CRUD (form-encoded in, HTML out) --------------------------
 
 	mux.HandleFunc("POST /_ui/api/rules", func(w http.ResponseWriter, r *http.Request) {
-		rl := ruleFromForm(r)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := rule.CheckRule(rl); err != nil {
+		rl, err := ruleFromForm(r)
+		if err != nil {
 			Editor(rl, true, err.Error(), "").Render(r.Context(), w)
 			return
 		}
-		created := srv.CreateRule(rl)
+		created, err := srv.CreateRule(rl) // mints an id, then validates with it
+		if err != nil {
+			Editor(rl, true, err.Error(), "").Render(r.Context(), w)
+			return
+		}
 		notify(w, "Rule created", true)
 		Editor(created, false, "", "").Render(r.Context(), w)
 	})
@@ -78,15 +82,16 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 	mux.HandleFunc("PUT /_ui/api/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// Sequenced rules are YAML-authored; the form can't express the list, so
-		// saving one here would flatten it. Reject rather than silently clobber.
-		if existing := srv.FindRule(id); existing != nil && existing.Sequenced() {
-			Editor(*existing, false, "sequenced responses aren't editable in the UI yet — edit the YAML and reload", "").Render(r.Context(), w)
+		rl, err := ruleFromForm(r)
+		if err != nil {
+			rl.ID = id
+			Editor(rl, false, err.Error(), "").Render(r.Context(), w)
 			return
 		}
-		rl := ruleFromForm(r)
+		// Assign the id before validating: a sequenced rule requires a non-empty
+		// id, and this is the stable one it keeps (ADR-0008).
+		rl.ID = id
 		if err := rule.CheckRule(rl); err != nil {
-			rl.ID = id
 			Editor(rl, false, err.Error(), "").Render(r.Context(), w)
 			return
 		}
@@ -150,10 +155,14 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 	// ---- testing ---------------------------------------------------------
 
 	mux.HandleFunc("POST /_ui/api/test-dry", func(w http.ResponseWriter, r *http.Request) {
-		rl := ruleFromForm(r)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		rl, err := ruleFromForm(r)
+		if err != nil {
+			TestError("invalid rule: "+err.Error()).Render(r.Context(), w)
+			return
+		}
 		probe := decodeProbeRequest(r)
 		req, err := http.NewRequest(probe.Method, probe.Path, strings.NewReader(probe.Body))
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err != nil {
 			TestError("invalid probe request: "+err.Error()).Render(r.Context(), w)
 			return
@@ -247,9 +256,14 @@ func toast(w http.ResponseWriter, msg, typ string) {
 
 // ---- form decoding -------------------------------------------------------
 
-func ruleFromForm(r *http.Request) rule.Rule {
+// ruleFromForm builds a rule from the editor form. The response side is read
+// per the explicit resp_mode discriminator (ADR-0008): "sequence" decodes the
+// hidden `responses` JSON field (a 1-element list collapses to a singular
+// response; anything else stays a list, letting CheckRule reject an empty one);
+// otherwise the flat single-response fields are used. Reading only the declared
+// mode's fields keeps response/responses mutually exclusive by construction.
+func ruleFromForm(r *http.Request) (rule.Rule, error) {
 	r.ParseForm()
-	status, _ := strconv.Atoi(r.FormValue("status"))
 	rl := rule.Rule{
 		Name: r.FormValue("name"),
 		Request: rule.Request{
@@ -259,19 +273,34 @@ func ruleFromForm(r *http.Request) rule.Rule {
 			Headers:  kvFromForm(r, "reqh"),
 			Query:    kvFromForm(r, "reqq"),
 		},
-		Response: rule.Response{
-			Status:   status,
-			Headers:  kvFromForm(r, "resph"),
-			Body:     r.FormValue("body"),
-			BodyFile: r.FormValue("body_file"),
-			Delay:    r.FormValue("delay"),
-			Template: r.FormValue("template") != "",
-		},
 	}
 	if mode := r.FormValue("body_mode"); mode != "" && mode != "none" {
 		rl.Request.Body = &rule.BodyMatch{Mode: mode, Value: r.FormValue("body_match")}
 	}
-	return rl
+
+	if r.FormValue("resp_mode") == "sequence" {
+		var resps []rule.Response
+		if err := json.Unmarshal([]byte(r.FormValue("responses")), &resps); err != nil {
+			return rl, fmt.Errorf("invalid responses list: %w", err)
+		}
+		if len(resps) == 1 {
+			rl.Response = resps[0] // a lone element is just a single response
+		} else {
+			rl.Responses = resps // 0 (rejected by CheckRule) or >= 2 (sequenced)
+		}
+		return rl, nil
+	}
+
+	status, _ := strconv.Atoi(r.FormValue("status"))
+	rl.Response = rule.Response{
+		Status:   status,
+		Headers:  kvFromForm(r, "resph"),
+		Body:     r.FormValue("body"),
+		BodyFile: r.FormValue("body_file"),
+		Delay:    r.FormValue("delay"),
+		Template: r.FormValue("template") != "",
+	}
+	return rl, nil
 }
 
 func kvFromForm(r *http.Request, prefix string) map[string]string {

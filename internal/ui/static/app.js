@@ -6,6 +6,68 @@ function kvList(prefix, items) {
   return { prefix: prefix, items: items };
 }
 
+// respEditor drives the Response tab: a single response (flat form) until a
+// second is added, then an editable sequence list. State serializes to the
+// hidden `responses` JSON field; `resp_mode` tells the server which to read.
+// See ADR-0008.
+function respEditor(initial) {
+  return {
+    mode: initial.mode,
+    responses: initial.responses,
+    _nid: initial.responses.length,
+    nextId() { return this._nid++; },
+    blank() {
+      return { _id: this.nextId(), status: '200', delay: '', template: false, body: '', bodyFile: '', headers: [] };
+    },
+    // Snapshot the flat single-response form from the live DOM, so an in-progress
+    // edit survives the single -> sequence conversion.
+    readFlat() {
+      const form = this.$root.closest('form');
+      const val = (n) => { const el = form.querySelector('.form-section-resp [name="' + n + '"]'); return el ? el.value : ''; };
+      const headers = [];
+      const ks = form.querySelectorAll('.form-section-resp [name="resph_k"]');
+      const vs = form.querySelectorAll('.form-section-resp [name="resph_v"]');
+      ks.forEach((k, i) => { if (k.value) headers.push({ k: k.value, v: vs[i] ? vs[i].value : '' }); });
+      const tpl = form.querySelector('.form-section-resp [name="template"]');
+      return { _id: this.nextId(), status: val('status') || '200', delay: val('delay'),
+        template: tpl ? tpl.checked : false, body: val('body'), bodyFile: val('body_file'), headers: headers };
+    },
+    addResponse() {
+      if (this.mode === 'single') {
+        this.responses = [this.readFlat(), this.blank()];
+        this.mode = 'sequence';
+      } else {
+        this.responses.push(this.blank());
+      }
+      this.$nextTick(() => {
+        const items = this.$root.querySelectorAll('.seq-item');
+        const last = items[items.length - 1];
+        if (last) { const inp = last.querySelector('input'); if (inp) inp.focus(); }
+      });
+    },
+    removeResponse(i) { this.responses.splice(i, 1); },
+    moveUp(i) { if (i > 0) { const a = this.responses; const t = a[i - 1]; a[i - 1] = a[i]; a[i] = t; } },
+    moveDown(i) { const a = this.responses; if (i < a.length - 1) { const t = a[i + 1]; a[i + 1] = a[i]; a[i] = t; } },
+    // Serialize to the wire shape (json tags on rule.Response): status numeric,
+    // headers as an object, body_file key; empties omitted.
+    serialized() {
+      return JSON.stringify(this.responses.map((r) => {
+        const o = { status: parseInt(r.status, 10) || 0 };
+        if (r.delay) o.delay = r.delay;
+        if (r.template) o.template = true;
+        if (r.body) o.body = r.body;
+        if (r.bodyFile) o.body_file = r.bodyFile;
+        const hs = {};
+        (r.headers || []).forEach((h) => { if (h.k) hs[h.k] = h.v; });
+        if (Object.keys(hs).length) o.headers = hs;
+        return o;
+      }));
+    },
+    statusClass(s) { return 'status status-' + Math.floor((parseInt(s, 10) || 0) / 100) + 'xx'; },
+    preview(s) { s = (s || '').replace(/\s+/g, ' ').trim(); return s.length > 60 ? s.slice(0, 60) + '…' : s; },
+  };
+}
+
 // ---- helpers -----------------------------------------------------------------
 
 const $ = (sel, root) => (root || document).querySelector(sel);

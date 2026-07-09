@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- **Edit sequenced responses in the Web UI.** The response editor gains an ordered, editable list: add a second response to make a rule sequenced, reorder with up/down, delete back to one to return to a single response. Sequenced rules are no longer read-only in the UI. See ADR-0008.
+- **Fix:** duplicating a sequenced rule silently dropped its `responses` list (the editor form never carried it), producing a single-response copy. Duplicate now preserves the full sequence (with a fresh id, hence a fresh position).
+- Internally, the responses list crosses the UI boundary as one hidden JSON field, and IDs are now assigned before validation on every write path — which also closes a latent gap where an id-less sequenced rule could bypass the "explicit id" guard on save (noted in ADR-0007).
+
 ## 1.2.0
 
 - **Sequenced responses** — a rule may carry an ordered `responses:` list instead of a single `response:`; the Nth matching request gets the Nth response and the last one sticks. Covers 202→200 polling, 500→200 retry, and pagination. Matching stays stateless; the position is tracked per-rule outside the rule set and survives `SIGHUP` reload. See ADR-0007.

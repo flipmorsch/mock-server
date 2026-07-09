@@ -80,6 +80,8 @@ rules:
 
 Each element is a full response (its own status, headers, body/`body_file`, `delay`, `template`). `responses:` and `response:` are mutually exclusive, and the rule **must** have an explicit `id:` — the position is tracked per-rule by id and preserved across a `SIGHUP` reload, so an id-less rule (whose id is minted fresh on load) is rejected. Reset the position with `m.Reset()` (library) or `POST /__admin/reset`.
 
+You can also build a sequence in the Web UI: on a rule's Response tab, **+ add response** turns a single response into a list (reorder with ↑/↓, delete back to one to revert). UI-created rules get a stable id automatically. Editing the list does not rewind a running sequence — use Reset for that.
+
 ## Hot reload
 
 Running **without** `--ui`, send `SIGHUP` to reload the rules from the file without a restart:

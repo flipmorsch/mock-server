@@ -447,8 +447,6 @@ body.editing .editor-pane {
   border-radius: 999px;
 }
 
-.seq-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
-.seq-list li { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .seq-body {
   color: var(--fg-mut);
   font-family: var(--mono);
@@ -456,7 +454,34 @@ body.editing .editor-pane {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
+
+.seq-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  background: var(--bg-1);
+}
+.seq-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.seq-summary::-webkit-details-marker { display: none; }
+.seq-idx {
+  flex-shrink: 0;
+  min-width: 18px;
+  text-align: center;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.seq-controls { margin-left: auto; flex-shrink: 0; display: flex; gap: 2px; }
+.seq-fields { padding: 4px 10px 10px; border-top: 1px solid var(--border); }
+.seq-convert { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .editor-form { padding: 6px 14px 20px; }
 

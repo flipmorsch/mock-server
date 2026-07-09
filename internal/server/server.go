@@ -103,13 +103,19 @@ func (s *Server) FindRule(id string) *rule.Rule {
 	return nil
 }
 
-func (s *Server) CreateRule(r rule.Rule) rule.Rule {
+// CreateRule mints a stable id, validates the rule with that id in place, then
+// appends it. Validating after minting is what lets a sequenced rule pass the
+// "responses requires an explicit id" guard (ADR-0008).
+func (s *Server) CreateRule(r rule.Rule) (rule.Rule, error) {
+	r.ID = newID()
+	if err := rule.CheckRule(r); err != nil {
+		return rule.Rule{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r.ID = newID()
 	s.workingCopy.Rules = append(s.workingCopy.Rules, r)
 	s.unsaved = true
-	return r
+	return r, nil
 }
 
 func (s *Server) UpdateRule(id string, updated rule.Rule) (*rule.Rule, bool) {
@@ -185,15 +191,19 @@ func (s *Server) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Validate the working copy BEFORE cloneConfig mints ids, so the
+	// "responses requires an explicit id" guard sees the pre-mint state and an
+	// id-less sequenced rule can't slip through by getting a minted id first
+	// (closes the ADR-0007 landmine). Check is non-mutating; every working-copy
+	// rule already carries an id, so this never false-rejects.
+	if err := s.workingCopy.Check(); err != nil {
+		return err
+	}
+
 	// The file keeps the user's body_file references and raw delay strings;
 	// body_file content is read at serve time, delays are parsed by Validate.
-	//
-	// ponytail: cloneConfig mints IDs for id-less rules, so this validates
-	// AFTER minting — unlike every other entry path (ParseConfig/Reload), which
-	// validate before minting so the "responses requires an explicit id" guard
-	// can catch an omitted id. It holds today because no UI path produces a
-	// sequenced (Responses) rule. When UI sequenced-editing lands, validate the
-	// working copy for the id-less-sequenced case BEFORE this clone mints.
+	// cloneConfig mints IDs for id-less rules, so the id-less-sequenced guard is
+	// enforced by the Check above (pre-mint), not here.
 	serving := cloneConfig(s.workingCopy)
 	if err := serving.Validate(); err != nil {
 		return err
