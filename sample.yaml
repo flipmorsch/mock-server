@@ -23,6 +23,20 @@ rules:
       body: |
         {"id": 2, "name": "Bob"}
 
+  # Pattern path: {id} matches one segment and is echoed back via {{.Param}}.
+  - name: "get user by id"
+    request:
+      method: GET
+      path: /users/{id}
+      path_mode: pattern
+    response:
+      status: 200
+      headers:
+        content-type: application/json
+      template: true
+      body: |
+        {"id": "{{.Param "id"}}", "name": "User {{.Param "id"}}"}
+
   - name: "health check"
     request:
       method: GET

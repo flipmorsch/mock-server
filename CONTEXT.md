@@ -7,10 +7,11 @@ A mapping from an HTTP request pattern (method, URL path, headers, query paramet
 All match dimensions, latency simulation, dynamic responses, hot reload, TLS, and an embeddable Go library are implemented (see ADR-0004, ADR-0005, ADR-0006).
 
 ### Path Matching
-A Rule's URL path can be matched in one of three modes, chosen per-Rule:
+A Rule's URL path can be matched in one of four modes, chosen per-Rule:
 - **Exact** — the request path must equal the Rule's path exactly.
 - **Prefix** — the request path must equal the Rule's path, or start with the Rule's path followed by `/` (path-segment prefix).
-- **Regex** — the request path must match the Rule's regular expression (validated at startup).
+- **Regex** — the request path must match the Rule's regular expression (validated at startup). Named capture groups (`(?P<id>…)`) are exposed to the response template.
+- **Pattern** — the request path is matched against a path template in which each `{name}` placeholder matches exactly one path segment (`[^/]+`), mirroring `net/http` ServeMux wildcards and OpenAPI path templating. `/users/{id}` matches `/users/42` but not `/users/42/edit` or `/users`. Placeholder names must be well-formed and unique (validated at startup); the captured values are exposed to the response template as `{{.Param "id"}}`.
 
 ### Header and Query Matching
 Headers and query parameters use exact value matching. All specified key-value pairs must match (AND semantics). Extra query parameters in the request are ignored; extra headers are ignored.
@@ -36,7 +37,7 @@ A Rule with sequenced responses must carry an explicit `id`, because the sequenc
 A Rule may include a `delay` field (e.g. `500ms`, `2s`) to simulate network latency. The server sleeps for the specified duration before writing the response.
 
 ### Dynamic Responses
-A Rule with `template: true` processes its body through Go's `text/template`. Available data: `{{.Method}}`, `{{.Path}}`, `{{.Body}}`, `{{.Header "X"}}`, `{{.Query "k"}}`. Custom functions: `now`, `nowFormat`, `randomInt`, `randomString`, `counter`, `requestCount` (how many recorded requests match an optional method/path — sound beyond the Journal's retained window). Without the template flag, the body is served as a literal string.
+A Rule with `template: true` processes its body through Go's `text/template`. Available data: `{{.Method}}`, `{{.Path}}`, `{{.Body}}`, `{{.Header "X"}}`, `{{.Query "k"}}`, and `{{.Param "id"}}` (a path parameter captured by a `pattern` or `regex` path; a missing name renders empty). Custom functions: `now`, `nowFormat`, `randomInt`, `randomString`, `counter`, `requestCount` (how many recorded requests match an optional method/path — sound beyond the Journal's retained window). When `template: true`, the response's header values are processed the same way (header keys are not), so a `Location` header can echo a path parameter. Without the template flag, the body is served as a literal string.
 
 ### Unmatched Requests
 Requests matching no Rule receive HTTP 404 with no body. Users can simulate a default response by placing a Rule with no match criteria at the end of their Rule list.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0
+
+- **Path parameters.** A new `path_mode: pattern` matches templated paths where each `{name}` captures one path segment — `/users/{id}` matches `/users/42` but not `/users/42/edit` or `/users` — mirroring `net/http` ServeMux and OpenAPI path templating. Placeholder names are validated for well-formedness and uniqueness at startup. (M4)
+- **`{{.Param "id"}}` template accessor.** Read captured path parameters in a `template: true` response — from a `pattern` path or a `regex` path's named groups (`(?P<id>…)`). A missing name renders empty, so it never errors.
+- **Response header values are templated too** when `template: true` (keys stay literal), so a `201` can return `Location: /users/{{.Param "id"}}`. A header template error falls back to the raw value rather than failing the response.
+
 ## 1.5.0
 
 - **Self-diagnosing library assertions.** A failed `Verify*` now prints each received request's body, and — when the `Match` carried a `JSONBody` — names the first JSON path that differed (`↳ JSONBody.amount: got 300, want 500`). The near-miss debug identity now pays rent inside a Go test, not just the Web UI. (M3)

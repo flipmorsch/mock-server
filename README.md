@@ -50,7 +50,7 @@ rules:
 ### Request matching
 
 - **`method`** — HTTP method (case-insensitive).
-- **`path`** + **`path_mode`** — `exact` (default), `prefix` (path-segment prefix), or `regex`.
+- **`path`** + **`path_mode`** — `exact` (default), `prefix` (path-segment prefix), `regex`, or `pattern` (`/users/{id}` — each `{name}` matches one segment, like ServeMux/OpenAPI; captures are readable in the response template).
 - **`headers`** / **`query`** — exact key/value matches (AND semantics; extras ignored).
 - **`body`** — `{mode: exact|contains, value: ...}` (defaults to `exact`).
 
@@ -62,7 +62,7 @@ All specified criteria must match (AND). Rules are evaluated in order; the first
 - **`headers`** — response headers (defaults to `Content-Type: text/plain; charset=utf-8`).
 - **`body`** / **`body_file`** — inline body, or a file read from disk on each request (mutually exclusive).
 - **`delay`** — latency before responding, e.g. `500ms`, `2s`.
-- **`template`** — when `true`, the body is rendered as a Go `text/template` (`.Method`, `.Path`, `.Body`, `.Header "X"`, `.Query "k"`; funcs `now`, `nowFormat`, `randomInt`, `randomString`, `counter`).
+- **`template`** — when `true`, the body **and header values** are rendered as a Go `text/template` (`.Method`, `.Path`, `.Body`, `.Header "X"`, `.Query "k"`, `.Param "id"` for `pattern`/`regex` path captures; funcs `now`, `nowFormat`, `randomInt`, `randomString`, `counter`). A missing path param renders empty, so a `201` can carry `Location: /users/{{.Param "id"}}`.
 
 ### Sequenced responses
 
