@@ -14,6 +14,7 @@
 package mock
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -129,7 +130,7 @@ func (s *Server) Count(method, path string) int {
 func (s *Server) Verify(method, path string, n int) error {
 	if got := s.Count(method, path); got != n {
 		return fmt.Errorf("expected %d request(s) matching %s %s, got %d\nreceived:\n%s",
-			n, orAny(method), orAny(path), got, s.summary())
+			n, orAny(method), orAny(path), got, s.summary(nil))
 	}
 	return nil
 }
@@ -139,7 +140,7 @@ func (s *Server) Verify(method, path string, n int) error {
 func (s *Server) VerifyCalled(method, path string) error {
 	if s.Count(method, path) == 0 {
 		return fmt.Errorf("expected at least one request matching %s %s, got none\nreceived:\n%s",
-			orAny(method), orAny(path), s.summary())
+			orAny(method), orAny(path), s.summary(nil))
 	}
 	return nil
 }
@@ -194,7 +195,7 @@ func (m Match) extraMatch(e *server.JournalEntry) bool {
 func (s *Server) VerifyMatch(m Match, n int) error {
 	if got := s.CountMatch(m); got != n {
 		return fmt.Errorf("expected %d request(s) matching %s, got %d\nreceived:\n%s",
-			n, m, got, s.summary())
+			n, m, got, s.summary(&m))
 	}
 	return nil
 }
@@ -203,7 +204,7 @@ func (s *Server) VerifyMatch(m Match, n int) error {
 func (s *Server) VerifyAtLeast(m Match, n int) error {
 	if got := s.CountMatch(m); got < n {
 		return fmt.Errorf("expected at least %d request(s) matching %s, got %d\nreceived:\n%s",
-			n, m, got, s.summary())
+			n, m, got, s.summary(&m))
 	}
 	return nil
 }
@@ -212,7 +213,7 @@ func (s *Server) VerifyAtLeast(m Match, n int) error {
 func (s *Server) VerifyAtMost(m Match, n int) error {
 	if got := s.CountMatch(m); got > n {
 		return fmt.Errorf("expected at most %d request(s) matching %s, got %d\nreceived:\n%s",
-			n, m, got, s.summary())
+			n, m, got, s.summary(&m))
 	}
 	return nil
 }
@@ -250,16 +251,59 @@ func kvString(kv map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
-func (s *Server) summary() string {
+// summary renders the received requests for a failed assertion. Each line carries
+// the request's (truncated) body — the thing a body assertion exists to explain. If
+// m carries a JSONBody, every method/path-matching request is annotated with the
+// first JSON path that differed, so the failure diagnoses itself.
+func (s *Server) summary(m *Match) string {
 	entries := s.journal.Entries(nil)
 	if len(entries) == 0 {
 		return "  (no requests received)"
 	}
 	var b strings.Builder
-	for _, e := range entries {
-		fmt.Fprintf(&b, "  %s %s → %d\n", e.Method, e.Path, e.Status)
+	for i := range entries {
+		e := &entries[i]
+		path := e.Path
+		if e.Query != "" {
+			path += "?" + e.Query
+		}
+		fmt.Fprintf(&b, "  %s %s → %d\n", e.Method, path, e.Status)
+		if e.Body != "" {
+			fmt.Fprintf(&b, "    body: %s\n", truncBody(e.Body))
+		}
+		if m != nil && m.JSONBody != "" && methodPathMatch(m, e) {
+			if p, wv, gv, ok := rule.JSONBodyDiff(m.JSONBody, e.Body); !ok {
+				label := "JSONBody"
+				if p != "" {
+					label += "." + p
+				}
+				fmt.Fprintf(&b, "    ↳ %s: got %s, want %s\n", label, jsonVal(gv), jsonVal(wv))
+			}
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func methodPathMatch(m *Match, e *server.JournalEntry) bool {
+	if m.Method != "" && !strings.EqualFold(m.Method, e.Method) {
+		return false
+	}
+	return m.Path == "" || m.Path == e.Path
+}
+
+func truncBody(b string) string {
+	const max = 256
+	if len(b) > max {
+		return b[:max] + "…"
+	}
+	return b
+}
+
+func jsonVal(v any) string {
+	if b, err := json.Marshal(v); err == nil {
+		return string(b)
+	}
+	return fmt.Sprintf("%v", v)
 }
 
 func orAny(s string) string {
