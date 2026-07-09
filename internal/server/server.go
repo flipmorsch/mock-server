@@ -19,6 +19,7 @@ type Server struct {
 	configPath  string
 	journal     *Journal
 	uiEnabled   bool
+	tlsEnabled  bool // set once at startup before serving; read by the probe
 	unsaved     bool
 	mu          sync.RWMutex
 }
@@ -220,6 +221,16 @@ func (s *Server) Journal() *Journal {
 }
 func (s *Server) UIEnabled() bool {
 	return s.uiEnabled
+}
+
+// SetTLSEnabled records whether the server is serving HTTPS. Called once at
+// startup before serving begins; the UI's probe reads it to pick the scheme.
+func (s *Server) SetTLSEnabled(v bool) {
+	s.tlsEnabled = v
+}
+
+func (s *Server) TLSEnabled() bool {
+	return s.tlsEnabled
 }
 
 // MatchRule walks the serving rules in order. It returns the first match

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
@@ -17,12 +18,15 @@ import (
 	"mock-server/internal/ui"
 )
 
-const version = "0.4.0"
+const version = "1.0.0"
 
 func main() {
 	listenOverride := flag.String("listen", "", "override listen address (e.g., 127.0.0.1:8080)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	uiEnabled := flag.Bool("ui", false, "enable embedded Web UI at /_ui/")
+	tlsFlag := flag.Bool("tls", false, "serve HTTPS (self-signed cert if --tls-cert/--tls-key not given)")
+	tlsCert := flag.String("tls-cert", "", "path to TLS certificate file (implies --tls)")
+	tlsKey := flag.String("tls-key", "", "path to TLS private key file (implies --tls)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: mock-server [flags] <config.yaml>\n")
 		flag.PrintDefaults()
@@ -60,6 +64,14 @@ func main() {
 		addr = *listenOverride
 	}
 
+	// --tls-cert and --tls-key are provided together, and either one implies TLS.
+	if (*tlsCert == "") != (*tlsKey == "") {
+		fmt.Fprintln(os.Stderr, "Error: --tls-cert and --tls-key must be provided together")
+		os.Exit(1)
+	}
+	tlsEnabled := *tlsFlag || *tlsCert != ""
+	srv.SetTLSEnabled(tlsEnabled)
+
 	h := &handler{srv: srv}
 
 	// Hot reload is headless-only (ADR-0004): under --ui the working copy owns
@@ -68,9 +80,38 @@ func main() {
 	// unsaved working copy from an accidental `kill -HUP`.
 	go watchReload(srv, *uiEnabled)
 
-	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, h); err != nil {
-		fmt.Fprintf(os.Stderr, "server error: %v\n", err)
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second, // Slowloris guard on the header read
+	}
+
+	scheme := "http"
+	if tlsEnabled {
+		scheme = "https"
+	}
+	log.Printf("listening on %s://%s", scheme, addr)
+
+	// Single listener, HTTP xor HTTPS (ADR-0005). ListenAndServeTLS uses the
+	// TLSConfig certificate when the file arguments are empty.
+	var serveErr error
+	switch {
+	case *tlsCert != "":
+		serveErr = httpServer.ListenAndServeTLS(*tlsCert, *tlsKey)
+	case tlsEnabled:
+		cert, err := server.GenerateSelfSigned()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "generating self-signed certificate: %v\n", err)
+			os.Exit(1)
+		}
+		httpServer.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+		log.Printf("self-signed certificate SHA-256: %s", server.CertFingerprint(cert))
+		serveErr = httpServer.ListenAndServeTLS("", "")
+	default:
+		serveErr = httpServer.ListenAndServe()
+	}
+	if serveErr != nil && serveErr != http.ErrServerClosed {
+		fmt.Fprintf(os.Stderr, "server error: %v\n", serveErr)
 		os.Exit(1)
 	}
 }

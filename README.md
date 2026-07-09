@@ -1,6 +1,6 @@
 # mock-server
 
-A standalone CLI tool that serves mock HTTP responses based on a YAML configuration file.
+A standalone CLI that serves mock HTTP responses from a YAML config file — with request matching across every dimension, latency simulation, templated responses, TLS, hot reload, and an embedded debug UI.
 
 ## Install
 
@@ -11,8 +11,14 @@ go build -o mock-server .
 ## Usage
 
 ```sh
-mock-server [--listen addr:port] <config.yaml>
+mock-server [--listen addr:port] [--ui] [--tls] [--tls-cert file --tls-key file] <config.yaml>
 ```
+
+- `--listen` — override the listen address (default `127.0.0.1:8080`).
+- `--ui` — enable the embedded Web UI at `/_ui/` (live request journal, match explanations, dry-run + probe testing).
+- `--tls` — serve HTTPS. With no cert supplied, an ephemeral self-signed certificate is generated and its SHA-256 fingerprint is logged.
+- `--tls-cert` / `--tls-key` — serve HTTPS with a provided certificate/key pair (given together; implies `--tls`).
+- `--version`, `--help`.
 
 ## Config File
 
@@ -36,23 +42,39 @@ rules:
     request:
       method: GET
       path: /health
-      path_mode: exact
     response:
       status: 200
       body: OK
 ```
 
-- **`method`** — HTTP method to match (case-insensitive).
-- **`path`** — URL path to match.
-- **`path_mode`** — `exact` (default). Future: `prefix`, `regex`.
-- **`response.status`** — HTTP status code.
-- **`response.headers`** — Response headers (optional).
-- **`response.body`** — Inline response body (mutually exclusive with `body_file`).
-- **`response.body_file`** — Path to a file whose contents are used as the response body. Read at startup.
+### Request matching
 
-Multiple rules are evaluated in order. The first matching rule wins. If no rule matches, the server returns 404.
+- **`method`** — HTTP method (case-insensitive).
+- **`path`** + **`path_mode`** — `exact` (default), `prefix` (path-segment prefix), or `regex`.
+- **`headers`** / **`query`** — exact key/value matches (AND semantics; extras ignored).
+- **`body`** — `{mode: exact|contains, value: ...}` (defaults to `exact`).
 
-## Run Tests
+All specified criteria must match (AND). Rules are evaluated in order; the first match wins. No match → 404.
+
+### Response
+
+- **`status`** — HTTP status code (default 200).
+- **`headers`** — response headers (defaults to `Content-Type: text/plain; charset=utf-8`).
+- **`body`** / **`body_file`** — inline body, or a file read from disk on each request (mutually exclusive).
+- **`delay`** — latency before responding, e.g. `500ms`, `2s`.
+- **`template`** — when `true`, the body is rendered as a Go `text/template` (`.Method`, `.Path`, `.Body`, `.Header "X"`, `.Query "k"`; funcs `now`, `nowFormat`, `randomInt`, `randomString`, `counter`).
+
+## Hot reload
+
+Running **without** `--ui`, send `SIGHUP` to reload the rules from the file without a restart:
+
+```sh
+kill -HUP <pid>
+```
+
+The reload is atomic and validated — an invalid file leaves the running rules unchanged. Disabled under `--ui` (the UI owns the in-memory rules). Unix only.
+
+## Run tests
 
 ```sh
 go test ./...

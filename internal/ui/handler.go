@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -161,7 +162,7 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 	mux.HandleFunc("POST /_ui/api/test-probe", func(w http.ResponseWriter, r *http.Request) {
 		probe := decodeProbeRequest(r)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		resp, err := sendProbe(srv.ListenAddr(), probe)
+		resp, err := sendProbe(srv.ListenAddr(), srv.TLSEnabled(), probe)
 		if err != nil {
 			TestError("probe failed: "+err.Error()).Render(r.Context(), w)
 			return
@@ -383,8 +384,19 @@ func parseHeaderLines(s string) map[string]string {
 	return m
 }
 
-func sendProbe(addr string, probe ProbeRequest) (*ProbeResult, error) {
-	req, err := http.NewRequest(probe.Method, "http://"+addr+probe.Path, strings.NewReader(probe.Body))
+func sendProbe(addr string, useTLS bool, probe ProbeRequest) (*ProbeResult, error) {
+	scheme := "http://"
+	client := http.DefaultClient
+	if useTLS {
+		scheme = "https://"
+		// The probe hits the server's own loopback listener, so there is no
+		// MITM surface — skip verification, which also covers a user-supplied
+		// cert whose SANs don't include the listen address (ADR-0005).
+		client = &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ponytail: loopback probe only
+		}}
+	}
+	req, err := http.NewRequest(probe.Method, scheme+addr+probe.Path, strings.NewReader(probe.Body))
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +404,7 @@ func sendProbe(addr string, probe ProbeRequest) (*ProbeResult, error) {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

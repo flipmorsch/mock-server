@@ -4,7 +4,7 @@
 A mapping from an HTTP request pattern (method, URL path, headers, query parameters, body) to a pre-configured mock HTTP response. All specified criteria of a Rule must match for the Rule to trigger (AND semantics). When multiple Rules match a request, the first one defined takes precedence (first-match-wins).
 
 
-All match dimensions, latency simulation, dynamic responses, and hot reload are implemented. TLS is designed for the 1.0 release (see ADR-0005) but not yet implemented; the library/embeddable form stays post-1.0.
+All match dimensions, latency simulation, dynamic responses, hot reload, and TLS are implemented (see ADR-0004 and ADR-0005). The library/embeddable form stays post-1.0.
 
 ### Path Matching
 A Rule's URL path can be matched in one of three modes, chosen per-Rule:
@@ -84,14 +84,16 @@ The UI communicates with the server through form-encoded endpoints under `/_ui/a
 ## Configuration
 Rules are defined in a YAML configuration file. The server reads this file at startup and writes to it when the user saves via the Web UI. The `listen` address is configurable both in the file and through the UI.
 
-The server configuration itself is minimal: a listen address and port (default `127.0.0.1:8080`). No TLS.
+The server configuration itself is minimal: a listen address and port (default `127.0.0.1:8080`). TLS is configured through CLI flags, not the config file (see TLS below).
 
+### TLS
+The server serves HTTPS when TLS is enabled. `--tls` enables it; with no certificate supplied, the server generates an ephemeral self-signed certificate at startup and logs its SHA-256 fingerprint. `--tls-cert` and `--tls-key` supply a certificate/key pair (given together) and imply `--tls`. The listener is either HTTP or HTTPS — never both, and there is no HTTP→HTTPS redirect. The Web UI and `/__admin/` API inherit TLS on the same listener. Enabling TLS turns on HTTP/2 (via ALPN). TLS is a bind-time concern: it is not affected by hot reload and requires a restart to change. See ADR-0005.
 
 ### CLI
 ```
-mock-server [--listen addr:port] [--ui] <config.yaml>
+mock-server [--listen addr:port] [--ui] [--tls] [--tls-cert file --tls-key file] <config.yaml>
 ```
-The config file path is required. `--listen` overrides the listen address from the config file. `--ui` activates the embedded Web UI. Standard `--help` and `--version` flags are supported.
+The config file path is required. `--listen` overrides the listen address from the config file. `--ui` activates the embedded Web UI. `--tls` / `--tls-cert` / `--tls-key` configure HTTPS (see TLS above). Standard `--help` and `--version` flags are supported.
 
 The server logs to stdout: a startup line with the listen address, and one line per request (method, path, status, matched Rule or "no match"). Errors are logged to stderr.
 
