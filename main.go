@@ -18,7 +18,7 @@ import (
 	"github.com/flipmorsch/mock-server/internal/ui"
 )
 
-const version = "1.4.0"
+const version = "1.5.0"
 
 func main() {
 	listenOverride := flag.String("listen", "", "override listen address (e.g., 127.0.0.1:8080)")

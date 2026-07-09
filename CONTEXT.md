@@ -41,6 +41,23 @@ A Rule with `template: true` processes its body through Go's `text/template`. Av
 ### Unmatched Requests
 Requests matching no Rule receive HTTP 404 with no body. Users can simulate a default response by placing a Rule with no match criteria at the end of their Rule list.
 
+## Go Library
+`mock-server` embeds in Go tests as an in-process test double via the `mock` package (`github.com/flipmorsch/mock-server/mock`). It serves the same YAML config as the CLI on a random loopback port, and the request Journal backs its assertions. The in-process mock serves only mock Rules — it never exposes the `/__admin/` API or the `/_ui/` console, so its Journal stays in-process.
+
+### Construction
+- `StartT(t, yaml)` — the test constructor. It parses the config, failing the test via `t.Fatalf` if the config is invalid, and registers `t.Cleanup` so the mock closes automatically at test end (a forgotten close cannot leak a goroutine or port). `t` is any value satisfying a minimal `TB` interface (`Helper`/`Fatalf`/`Cleanup`), which `*testing.T` does; the package does not import `testing`.
+- `Start(yaml) (*Server, error)` — the non-test form; the caller closes it with `Close()`.
+
+### Assertions
+`Received()` returns the recorded requests, each carrying the response the mock gave. `Count(method, path)` and `CountMatch(Match)` tally matches; `Verify`, `VerifyCalled`, `VerifyMatch`, `VerifyAtLeast`, and `VerifyAtMost` assert a count and return an error otherwise. A `Match` selects requests by `Method`, `Path`, `JSONBody` (JSON subset, as in Body Matching above), `Query`, and `Headers`: a non-empty query/header value must match exactly, an empty value asserts presence only. A method/path-only count uses monotonic tallies (sound beyond the Journal's retained window); adding a query, header, or body dimension scopes the count to that window.
+
+The sensitive headers redacted in the Journal (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`) are stored as `[REDACTED]`, so a header `Match` on them can assert presence (empty value) but never their real value.
+
+### Self-diagnosing failures
+A failed `Verify*` lists every received request with its (truncated) body. When the `Match` carried a `JSONBody`, each method/path-matching request is additionally annotated with the first JSON path that differed and its got/want values (`↳ JSONBody.amount: got 300, want 500`) — the near-miss diagnostic identity applied inside a Go test.
+
+`Reset()` clears the received requests and rewinds every response sequence to its first element, for isolation between subtests.
+
 ## Web UI
 A graphical interface for managing Rules and server configuration, embedded in the mock server binary. Activated with the `--ui` CLI flag; disabled by default. The UI is served under the `/_ui/` path prefix, which is a reserved namespace — user-defined Rules never match requests to `/_ui/` paths.
 
@@ -112,7 +129,7 @@ With the Web UI enabled (`--ui`), hot reload is disabled — the in-memory worki
 
 Invalid configuration causes the server to exit immediately with a descriptive error message to stderr. No partial startup.
 Implemented in Go, distributed as a single static binary.
-The tool is a standalone CLI binary. A library/embeddable form may follow.
+The tool is a standalone CLI binary and also embeds as a Go library (see Go Library above).
 
 ### Config File Structure
 ```yaml

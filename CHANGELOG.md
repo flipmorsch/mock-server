@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+
+- **Self-diagnosing library assertions.** A failed `Verify*` now prints each received request's body, and — when the `Match` carried a `JSONBody` — names the first JSON path that differed (`↳ JSONBody.amount: got 300, want 500`). The near-miss debug identity now pays rent inside a Go test, not just the Web UI. (M3)
+- **`Match` gains `Query` and `Headers`.** Assert the query params and headers your code sent, alongside `JSONBody`. A non-empty value matches exactly; an empty value asserts presence. The Journal's redacted sensitive headers are matchable by presence only, so the v1.0.1 redaction is untouched, and the frozen `/__admin/` filter semantics are unchanged (matching is done in the library layer).
+- **`StartT(t, yaml)`.** A testing-aware constructor that fatals on a bad config and auto-closes the mock via `t.Cleanup` — no more `if err != nil` / `defer m.Close()` boilerplate, and a forgotten close can't leak a goroutine or port. `Start` stays for non-test use.
+
 ## 1.4.0
 
 - **Journal shows the sequence position.** A request matched by a sequenced rule is annotated with which response served it — `→ poll job  seq 2/3` — in the live journal and the `/__admin/requests` JSON (`seq_pos`/`seq_total`). Answers "why did I get this response on this call?" at a glance. The position is clamped once the sequence is exhausted (last sticks).

@@ -104,19 +104,20 @@ go get github.com/flipmorsch/mock-server@latest
 import "github.com/flipmorsch/mock-server/mock"
 
 func TestCheckout(t *testing.T) {
-	m, err := mock.Start(`
+	m := mock.StartT(t, `
 rules:
   - request: {method: POST, path: /charge}
     response: {status: 200, body: '{"ok":true}'}
 `)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer m.Close()
+	// StartT fatals on a bad config and auto-closes the mock at test end (t.Cleanup).
 
 	checkout(m.URL()) // point the code under test at the mock, then exercise it
 
-	// Assert what your code sent to the dependency — failures list what was received.
+	// Assert what your code sent. On mismatch the error prints the request body and
+	// names the first field that differed:
+	//   POST /charge → 200
+	//     body: {"amount":300}
+	//     ↳ JSONBody.amount: got 300, want 500
 	if err := m.VerifyMatch(mock.Match{
 		Method: "POST", Path: "/charge", JSONBody: `{"amount":500}`,
 	}, 1); err != nil {
@@ -125,10 +126,14 @@ rules:
 }
 ```
 
-`Start` serves the same YAML as the CLI on a random loopback port. Helpers:
-`URL`, `Close`, `Reset`, `Received`, `Count`/`CountMatch`, and
-`Verify`/`VerifyCalled`/`VerifyMatch`/`VerifyAtLeast`/`VerifyAtMost`. `Match`
-supports `JSONBody` subset matching (partial objects, element-wise arrays).
+`StartT(t, …)` serves the same YAML as the CLI on a random loopback port and closes
+itself when the test ends; use `Start` (which returns an error) outside tests.
+Helpers: `URL`, `Close`, `Reset`, `Received`, `Count`/`CountMatch`, and
+`Verify`/`VerifyCalled`/`VerifyMatch`/`VerifyAtLeast`/`VerifyAtMost`. A `Match`
+selects requests by `Method`, `Path`, `JSONBody` (subset — partial objects,
+element-wise arrays), `Query`, and `Headers`: a non-empty value must match exactly,
+an empty value asserts presence. Sensitive headers are redacted in the journal, so
+they're matchable by presence only.
 
 ## Run tests
 
