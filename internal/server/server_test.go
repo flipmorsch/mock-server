@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -81,6 +82,61 @@ func TestSaveFidelity(t *testing.T) {
 	}
 	if loaded.Rules[1].Response.BodyFile != fixture {
 		t.Errorf("body_file lost on round-trip: %+v", loaded.Rules[1].Response)
+	}
+}
+
+func TestReload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	write := func(body string) {
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("rules:\n  - name: original\n    request: {method: GET, path: /a}\n    response: {status: 200, body: A}\n")
+	cfg, err := rule.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(cfg, path, NewJournal(), false)
+
+	match := func(p string) *rule.Rule {
+		got, _ := s.MatchRule(httptest.NewRequest("GET", p, nil), nil)
+		return got
+	}
+
+	if got := match("/a"); got == nil || got.Name != "original" {
+		t.Fatalf("pre-reload: want original for /a, got %v", got)
+	}
+
+	// Successful reload swaps the serving set and assigns IDs.
+	write("rules:\n  - name: replacement\n    request: {method: GET, path: /b}\n    response: {status: 200, body: B}\n")
+	n, err := s.Reload()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("reload count = %d, want 1", n)
+	}
+	if got := match("/a"); got != nil {
+		t.Errorf("post-reload: /a should no longer match, got %v", got)
+	}
+	got := match("/b")
+	if got == nil || got.Name != "replacement" {
+		t.Fatalf("post-reload: want replacement for /b, got %v", got)
+	}
+	if got.ID == "" {
+		t.Error("reloaded rule must get an ID for admin/journal coherence")
+	}
+
+	// Invalid reload keeps the last-good rule set unchanged.
+	write("rules: [{request: {method: GET}, response: {status: 200}}]") // path missing
+	if _, err := s.Reload(); err == nil {
+		t.Fatal("expected reload to reject invalid config")
+	}
+	if got := match("/b"); got == nil || got.Name != "replacement" {
+		t.Errorf("failed reload must retain rules: want replacement for /b, got %v", got)
 	}
 }
 

@@ -7,7 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"mock-server/internal/rule"
@@ -60,10 +62,35 @@ func main() {
 
 	h := &handler{srv: srv}
 
+	// Hot reload is headless-only (ADR-0004): under --ui the working copy owns
+	// the rules, so SIGHUP is ignored there rather than reloading — and, since
+	// unhandled SIGHUP would kill the process, ignoring it also protects the
+	// unsaved working copy from an accidental `kill -HUP`.
+	go watchReload(srv, *uiEnabled)
+
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, h); err != nil {
 		fmt.Fprintf(os.Stderr, "server error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// watchReload reloads the rule set from disk on SIGHUP. SIGHUP is never
+// delivered on Windows, where reload is simply unavailable — restart instead.
+func watchReload(srv *server.Server, uiEnabled bool) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGHUP)
+	for range sig {
+		if uiEnabled {
+			log.Print("SIGHUP ignored: hot reload is disabled under --ui")
+			continue
+		}
+		n, err := srv.Reload()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reload failed: %v; rules unchanged\n", err)
+			continue
+		}
+		log.Printf("reloaded %d rules", n)
 	}
 }
 

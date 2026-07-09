@@ -4,7 +4,7 @@
 A mapping from an HTTP request pattern (method, URL path, headers, query parameters, body) to a pre-configured mock HTTP response. All specified criteria of a Rule must match for the Rule to trigger (AND semantics). When multiple Rules match a request, the first one defined takes precedence (first-match-wins).
 
 
-All match dimensions, latency simulation, and dynamic responses are implemented. TLS and hot reload remain deferred.
+All match dimensions, latency simulation, dynamic responses, and hot reload are implemented. TLS is designed for the 1.0 release (see ADR-0005) but not yet implemented; the library/embeddable form stays post-1.0.
 
 ### Path Matching
 A Rule's URL path can be matched in one of three modes, chosen per-Rule:
@@ -96,6 +96,11 @@ The config file path is required. `--listen` overrides the listen address from t
 The server logs to stdout: a startup line with the listen address, and one line per request (method, path, status, matched Rule or "no match"). Errors are logged to stderr.
 
 Rules are fixed at startup from the config file, but may be mutated at runtime via the Web UI. Restart the server to discard unsaved UI changes.
+
+### Hot Reload
+When the server runs without the Web UI, sending it a `SIGHUP` signal reloads the Rule set from the configuration file without a restart. The reload is atomic and validated: the file is re-read and validated in full, and only a valid file replaces the running Rules — an invalid file leaves the running Rules unchanged. The `listen` address is not affected (rebinding requires a restart), and the request Journal is preserved across a reload. Hot reload is a Unix convenience: `SIGHUP` is not delivered on Windows.
+
+With the Web UI enabled (`--ui`), hot reload is disabled — the in-memory working copy owns the Rule set, so `SIGHUP` is ignored rather than reloading or terminating the server. See ADR-0004.
 
 Invalid configuration causes the server to exit immediately with a descriptive error message to stderr. No partial startup.
 Implemented in Go, distributed as a single static binary.

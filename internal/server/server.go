@@ -194,6 +194,27 @@ func (s *Server) Save() error {
 	return nil
 }
 
+// Reload re-reads the config file from disk, validates it, and atomically
+// swaps the serving rule set, returning the number of rules now serving. On
+// any error the current rules are left unchanged. Headless-only: it never
+// touches the UI's working copy, so it must not run while --ui owns the rules.
+func (s *Server) Reload() (int, error) {
+	cfg, err := rule.LoadConfig(s.configPath)
+	if err != nil {
+		return 0, err
+	}
+	// Reloaded rules need IDs too: /__admin/ and the journal carry them.
+	for i := range cfg.Rules {
+		if cfg.Rules[i].ID == "" {
+			cfg.Rules[i].ID = newID()
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config = cfg
+	return len(cfg.Rules), nil
+}
+
 func (s *Server) Journal() *Journal {
 	return s.journal
 }
