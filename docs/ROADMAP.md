@@ -62,9 +62,14 @@ response capture, and JSON subset body matching. **Next milestone: M2.**
 - **Substrate the library reads:** monotonic per-rule counts (from 1.0.1) and
   **response capture** (record status + response body in the journal, so
   `Received()` shows what the mock returned — also lays track for a future
-  record/playback).
+  record/playback). **Next milestone: M2.** [shipped — see M2 below]
 
-### M2 — Sequenced responses · M
+### M2 — Sequenced responses · ✅ shipped in v1.2.0
+Delivered: per-rule ordered `responses:` list (Nth match → Nth response, last
+sticks), stateless matching with the position tracked per-rule outside the rule
+set (`atomic.Add` + clamp, surviving reload keyed by explicit `id:`), a validation
+error for id-less `responses:` rules, `Reset()`/`POST /__admin/reset` rewinding
+sequences, and a read-only UI treatment. See ADR-0007. **Next milestone: M3.**
 - Per-rule ordered `responses:` list; the Nth matching request gets the Nth (last
   one sticks). Covers 202→200 polling, 500→200 retry, pagination.
 - Matching stays **stateless** — `Explain`/near-miss untouched. State = a per-rule

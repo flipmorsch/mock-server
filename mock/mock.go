@@ -82,8 +82,9 @@ func (s *Server) URL() string { return s.url }
 // Close shuts the mock down.
 func (s *Server) Close() error { return s.httpSrv.Close() }
 
-// Reset clears the record of received requests (call between test cases).
-func (s *Server) Reset() { s.journal.Clear() }
+// Reset clears the record of received requests and rewinds every response
+// sequence to its first element — a clean slate for the next test case.
+func (s *Server) Reset() { s.inner.Reset() }
 
 // Received returns the requests the mock has handled, oldest first (capped at the
 // journal's retained window; use Count/Verify for exact tallies).

@@ -31,3 +31,19 @@ rules:
     response:
       status: 200
       body: OK
+
+  # Sequenced responses: each successive GET /jobs/1 advances the list; the last
+  # sticks. Requires an explicit id (the sequence position is keyed by it).
+  - name: "poll job until done"
+    id: poll-job
+    request:
+      method: GET
+      path: /jobs/1
+      path_mode: exact
+    responses:
+      - status: 202
+        body: '{"state": "pending"}'
+      - status: 202
+        body: '{"state": "pending"}'
+      - status: 200
+        body: '{"state": "done"}'

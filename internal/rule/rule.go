@@ -9,8 +9,14 @@ type Rule struct {
 	ID       string   `yaml:"id"`
 	Name     string   `yaml:"name,omitempty"`
 	Request  Request  `yaml:"request"`
-	Response Response `yaml:"response"`
+	Response Response `yaml:"response,omitempty"`
+	// Responses, when non-empty, is an ordered list served one-per-match (Nth
+	// match → Nth element, last sticks). Mutually exclusive with Response.
+	Responses []Response `yaml:"responses,omitempty"`
 }
+
+// Sequenced reports whether the rule serves an ordered response list.
+func (r *Rule) Sequenced() bool { return len(r.Responses) > 0 }
 
 type Request struct {
 	Method   string            `yaml:"method,omitempty"`

@@ -77,8 +77,14 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 
 	mux.HandleFunc("PUT /_ui/api/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		rl := ruleFromForm(r)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// Sequenced rules are YAML-authored; the form can't express the list, so
+		// saving one here would flatten it. Reject rather than silently clobber.
+		if existing := srv.FindRule(id); existing != nil && existing.Sequenced() {
+			Editor(*existing, false, "sequenced responses aren't editable in the UI yet — edit the YAML and reload", "").Render(r.Context(), w)
+			return
+		}
+		rl := ruleFromForm(r)
 		if err := rule.CheckRule(rl); err != nil {
 			rl.ID = id
 			Editor(rl, false, err.Error(), "").Render(r.Context(), w)
@@ -432,7 +438,8 @@ func executePreview(body string, probe ProbeRequest) (string, error) {
 
 // ---- admin API (programmatic, unchanged contract) --------------------------
 
-func AdminHandler(journal *server.Journal) http.HandlerFunc {
+func AdminHandler(srv *server.Server) http.HandlerFunc {
+	journal := srv.Journal()
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -453,6 +460,11 @@ func AdminHandler(journal *server.Journal) http.HandlerFunc {
 			journal.Clear()
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+
+		case r.URL.Path == "/__admin/reset" && r.Method == "POST":
+			srv.Reset()
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
 
 		default:
 			w.WriteHeader(http.StatusNotFound)

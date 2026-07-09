@@ -18,7 +18,7 @@ import (
 	"github.com/flipmorsch/mock-server/internal/ui"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func main() {
 	listenOverride := flag.String("listen", "", "override listen address (e.g., 127.0.0.1:8080)")
@@ -165,7 +165,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasPrefix(r.URL.Path, "/__admin/") {
-		ui.AdminHandler(h.srv.Journal())(w, r)
+		ui.AdminHandler(h.srv)(w, r)
 		return
 	}
 	h.srv.ServeMock(w, r)

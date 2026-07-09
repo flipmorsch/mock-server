@@ -49,10 +49,21 @@ func (s *Server) ServeMock(w http.ResponseWriter, r *http.Request) {
 	matched, misses := s.MatchRule(r, body)
 	entry.Explanations = misses
 	if matched != nil {
-		if matched.Response.DelayDuration > 0 {
-			time.Sleep(matched.Response.DelayDuration)
+		// Select the response before sleeping so sequence order follows
+		// arrival, not who finishes a per-element delay first (ADR-0007).
+		// Trade-off: the position advances here, so a later writeResponse
+		// failure (e.g. a body_file deleted after the load-time readability
+		// check) still consumes this element. Accepted — advancing at match
+		// time is what makes concurrent ordering deterministic.
+		resp := &matched.Response
+		if matched.Sequenced() {
+			i := s.seq.selectIndex(matched.ID, len(matched.Responses))
+			resp = &matched.Responses[i]
 		}
-		status, respBody := s.writeResponse(w, &matched.Response, r, body)
+		if resp.DelayDuration > 0 {
+			time.Sleep(resp.DelayDuration)
+		}
+		status, respBody := s.writeResponse(w, resp, r, body)
 		entry.Duration = time.Since(start)
 		s.logf("%s %s → %d (matched: %s)", r.Method, r.URL.Path, status, matched.Name)
 		entry.Matched = matched.Name

@@ -24,6 +24,7 @@ type Server struct {
 	logger      *log.Logger // nil = silent (embedded/library default)
 	unsaved     bool
 	mu          sync.RWMutex
+	seq         *sequences // per-rule position for sequenced responses
 }
 
 func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled bool) *Server {
@@ -34,12 +35,15 @@ func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled 
 			cfg.Rules[i].ID = newID()
 		}
 	}
+	seq := newSequences()
+	seq.seed(cfg.Rules)
 	return &Server{
 		config:      cfg,
 		workingCopy: cloneConfig(cfg),
 		configPath:  configPath,
 		journal:     journal,
 		uiEnabled:   uiEnabled,
+		seq:         seq,
 	}
 }
 
@@ -66,6 +70,11 @@ func cloneConfig(cfg *rule.Config) *rule.Config {
 		// DelayDuration is yaml:"-" and doesn't survive the round-trip.
 		if d := clone.Rules[i].Response.Delay; d != "" {
 			clone.Rules[i].Response.DelayDuration, _ = time.ParseDuration(d)
+		}
+		for j := range clone.Rules[i].Responses {
+			if d := clone.Rules[i].Responses[j].Delay; d != "" {
+				clone.Rules[i].Responses[j].DelayDuration, _ = time.ParseDuration(d)
+			}
 		}
 	}
 	return &clone
@@ -178,6 +187,13 @@ func (s *Server) Save() error {
 
 	// The file keeps the user's body_file references and raw delay strings;
 	// body_file content is read at serve time, delays are parsed by Validate.
+	//
+	// ponytail: cloneConfig mints IDs for id-less rules, so this validates
+	// AFTER minting — unlike every other entry path (ParseConfig/Reload), which
+	// validate before minting so the "responses requires an explicit id" guard
+	// can catch an omitted id. It holds today because no UI path produces a
+	// sequenced (Responses) rule. When UI sequenced-editing lands, validate the
+	// working copy for the id-less-sequenced case BEFORE this clone mints.
 	serving := cloneConfig(s.workingCopy)
 	if err := serving.Validate(); err != nil {
 		return err
@@ -193,6 +209,7 @@ func (s *Server) Save() error {
 	}
 
 	s.config = serving
+	s.seq.seed(serving.Rules)
 	s.unsaved = false
 	return nil
 }
@@ -215,7 +232,16 @@ func (s *Server) Reload() (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.config = cfg
+	s.seq.seed(cfg.Rules)
 	return len(cfg.Rules), nil
+}
+
+// Reset clears the journal and rewinds every response sequence to its first
+// element — a clean slate for the next test case. Backs both the library's
+// m.Reset() and POST /__admin/reset.
+func (s *Server) Reset() {
+	s.journal.Clear()
+	s.seq.reset()
 }
 
 func (s *Server) Journal() *Journal {

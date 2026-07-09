@@ -427,6 +427,37 @@ body.editing .editor-pane {
   color: var(--err);
 }
 
+.banner-info {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--fg-mut);
+  font-size: 12px;
+}
+
+.rail-seq {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.seq-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.seq-list li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.seq-body {
+  color: var(--fg-mut);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .editor-form { padding: 6px 14px 20px; }
 
 .form-section {

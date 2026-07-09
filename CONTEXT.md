@@ -27,6 +27,11 @@ A Rule's response specifies an HTTP status code, optional headers, and a body (i
 
 `body_file` is checked for readability at startup and read from disk each time the response is served — edits to the file take effect without restart, and Save preserves the reference rather than inlining the content. If the file becomes unreadable at serve time, the server responds 500.
 
+### Sequenced Responses
+A Rule may specify an ordered list of Responses (`responses`) instead of a single Response (`response`); the two are mutually exclusive. The Nth request that matches the Rule receives the Nth Response in the list; once the list is exhausted, every further match receives the last Response ("last one sticks"). This models a resource that changes over successive calls — a job that returns 202 while pending then 200 when ready, an endpoint that fails 500 once then succeeds, paginated results. Each Response in the list is a full Response (own status, headers, body, delay, template).
+
+A Rule with sequenced responses must carry an explicit `id`, because the sequence position is tracked per-Rule keyed by that id, and the position is preserved across a hot reload — a Rule without a stable id would have its position silently reset. Matching itself remains stateless: the sequence position never affects which Rule matches, only which Response that Rule returns. Resetting a Rule's sequence position (back to the first Response) happens only as part of an explicit Reset for test isolation, never as a side effect of reload.
+
 ### Latency
 A Rule may include a `delay` field (e.g. `500ms`, `2s`) to simulate network latency. The server sleeps for the specified duration before writing the response.
 

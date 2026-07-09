@@ -74,16 +74,45 @@ func CheckRule(r Rule) error {
 			return fmt.Errorf("unsupported body mode %q (supported: exact, contains, json)", r.Request.Body.Mode)
 		}
 	}
-	if r.Response.Body != "" && r.Response.BodyFile != "" {
+	if r.Responses != nil && len(r.Responses) == 0 {
+		return fmt.Errorf("responses must have at least one element")
+	}
+	if r.Sequenced() {
+		if responseIsSet(r.Response) {
+			return fmt.Errorf("response and responses are mutually exclusive")
+		}
+		if r.ID == "" {
+			return fmt.Errorf("responses requires an explicit id (sequence state is keyed by id and would reset on reload without one)")
+		}
+		for i := range r.Responses {
+			if err := checkResponse(r.Responses[i]); err != nil {
+				return fmt.Errorf("responses[%d]: %w", i, err)
+			}
+		}
+		return nil
+	}
+	return checkResponse(r.Response)
+}
+
+// responseIsSet reports whether any response field was populated. Used to reject
+// a rule that sets both singular response and the responses list.
+func responseIsSet(r Response) bool {
+	return r.Status != 0 || r.Body != "" || r.BodyFile != "" ||
+		len(r.Headers) > 0 || r.Delay != "" || r.Template
+}
+
+// checkResponse validates one response's fields without mutating it.
+func checkResponse(r Response) error {
+	if r.Body != "" && r.BodyFile != "" {
 		return fmt.Errorf("body and body_file are mutually exclusive")
 	}
-	if r.Response.Delay != "" {
-		if _, err := time.ParseDuration(r.Response.Delay); err != nil {
-			return fmt.Errorf("invalid delay %q: %w", r.Response.Delay, err)
+	if r.Delay != "" {
+		if _, err := time.ParseDuration(r.Delay); err != nil {
+			return fmt.Errorf("invalid delay %q: %w", r.Delay, err)
 		}
 	}
-	if r.Response.Status != 0 && (r.Response.Status < 100 || r.Response.Status > 599) {
-		return fmt.Errorf("status %d out of range (100-599)", r.Response.Status)
+	if r.Status != 0 && (r.Status < 100 || r.Status > 599) {
+		return fmt.Errorf("status %d out of range (100-599)", r.Status)
 	}
 	return nil
 }
@@ -104,38 +133,54 @@ func (c *Config) Validate() error {
 	if err := c.Check(); err != nil {
 		return err
 	}
-	for i, rule := range c.Rules {
-		if rule.Response.Headers != nil {
-			canonical := make(map[string]string, len(rule.Response.Headers))
-			for k, v := range rule.Response.Headers {
+	for i := range c.Rules {
+		r := &c.Rules[i]
+		if r.Request.Headers != nil {
+			canonical := make(map[string]string, len(r.Request.Headers))
+			for k, v := range r.Request.Headers {
 				canonical[http.CanonicalHeaderKey(k)] = v
 			}
-			rule.Response.Headers = canonical
+			r.Request.Headers = canonical
 		}
-		if rule.Request.Headers != nil {
-			canonical := make(map[string]string, len(rule.Request.Headers))
-			for k, v := range rule.Request.Headers {
-				canonical[http.CanonicalHeaderKey(k)] = v
+		if r.Request.Body != nil && r.Request.Body.Mode == "" {
+			r.Request.Body.Mode = "exact"
+		}
+		if r.Sequenced() {
+			for j := range r.Responses {
+				if err := normalizeResponse(&r.Responses[j]); err != nil {
+					return fmt.Errorf("rule %d (%q) responses[%d]: %w", i+1, r.Name, j, err)
+				}
 			}
-			rule.Request.Headers = canonical
-		}
-		if rule.Request.Body != nil && rule.Request.Body.Mode == "" {
-			rule.Request.Body.Mode = "exact"
-		}
-		if rule.Response.Status == 0 {
-			rule.Response.Status = 200
-		}
-		if rule.Response.BodyFile != "" {
-			// Readability check only — the file is read at serve time, so the
-			// config keeps the user's reference and fixture edits apply live.
-			if _, err := os.ReadFile(rule.Response.BodyFile); err != nil {
-				return fmt.Errorf("rule %d (%q): reading body_file %q: %w", i+1, rule.Name, rule.Response.BodyFile, err)
+		} else {
+			if err := normalizeResponse(&r.Response); err != nil {
+				return fmt.Errorf("rule %d (%q): %w", i+1, r.Name, err)
 			}
 		}
-		if rule.Response.Delay != "" {
-			rule.Response.DelayDuration, _ = time.ParseDuration(rule.Response.Delay)
+	}
+	return nil
+}
+
+// normalizeResponse prepares one response for serving: canonical header keys,
+// default status, delay parsed, and body_file readability checked (read at serve
+// time, so the reference is kept and fixture edits apply live).
+func normalizeResponse(r *Response) error {
+	if r.Headers != nil {
+		canonical := make(map[string]string, len(r.Headers))
+		for k, v := range r.Headers {
+			canonical[http.CanonicalHeaderKey(k)] = v
 		}
-		c.Rules[i] = rule
+		r.Headers = canonical
+	}
+	if r.Status == 0 {
+		r.Status = 200
+	}
+	if r.BodyFile != "" {
+		if _, err := os.ReadFile(r.BodyFile); err != nil {
+			return fmt.Errorf("reading body_file %q: %w", r.BodyFile, err)
+		}
+	}
+	if r.Delay != "" {
+		r.DelayDuration, _ = time.ParseDuration(r.Delay)
 	}
 	return nil
 }

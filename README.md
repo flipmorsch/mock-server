@@ -1,6 +1,6 @@
 # mock-server
 
-A standalone CLI that serves mock HTTP responses from a YAML config file — with request matching across every dimension, latency simulation, templated responses, TLS, hot reload, and an embedded debug UI.
+A standalone CLI that serves mock HTTP responses from a YAML config file — with request matching across every dimension, latency simulation, templated responses, sequenced responses, TLS, hot reload, and an embedded debug UI.
 
 ## Install
 
@@ -63,6 +63,22 @@ All specified criteria must match (AND). Rules are evaluated in order; the first
 - **`body`** / **`body_file`** — inline body, or a file read from disk on each request (mutually exclusive).
 - **`delay`** — latency before responding, e.g. `500ms`, `2s`.
 - **`template`** — when `true`, the body is rendered as a Go `text/template` (`.Method`, `.Path`, `.Body`, `.Header "X"`, `.Query "k"`; funcs `now`, `nowFormat`, `randomInt`, `randomString`, `counter`).
+
+### Sequenced responses
+
+Give a rule an ordered `responses:` list instead of a single `response:` to return a different response on each successive matching request (the last one sticks) — for polling, retry, and pagination scenarios:
+
+```yaml
+rules:
+  - id: create-job      # required: the sequence position is keyed by id
+    request: {method: GET, path: /jobs/1}
+    responses:
+      - {status: 202, body: '{"state":"pending"}'}
+      - {status: 202, body: '{"state":"pending"}'}
+      - {status: 200, body: '{"state":"done"}'}
+```
+
+Each element is a full response (its own status, headers, body/`body_file`, `delay`, `template`). `responses:` and `response:` are mutually exclusive, and the rule **must** have an explicit `id:` — the position is tracked per-rule by id and preserved across a `SIGHUP` reload, so an id-less rule (whose id is minted fresh on load) is rejected. Reset the position with `m.Reset()` (library) or `POST /__admin/reset`.
 
 ## Hot reload
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0
+
+- **Sequenced responses** — a rule may carry an ordered `responses:` list instead of a single `response:`; the Nth matching request gets the Nth response and the last one sticks. Covers 202→200 polling, 500→200 retry, and pagination. Matching stays stateless; the position is tracked per-rule outside the rule set and survives `SIGHUP` reload. See ADR-0007.
+- **Sequenced rules require an explicit `id:`** — the position is keyed by id, so a rule without a stable id would silently reset on reload; this is now a validation error. `response:` and `responses:` are mutually exclusive.
+- **Reset rewinds sequences** — `m.Reset()` and the new `POST /__admin/reset` clear the journal *and* rewind every sequence to its first response (test isolation). `DELETE /__admin/requests` is unchanged (journal-only).
+- The Web UI shows sequenced rules read-only (they're YAML-authored); editing one there is rejected rather than flattening the list.
+
 ## 1.1.0
 
 - **Embeddable Go library** (`github.com/flipmorsch/mock-server/mock`) — run the mock in-process from Go tests: `mock.Start(yaml)` on a random loopback port, `URL`/`Close`/`Reset`/`Received`, and `Verify`/`VerifyCalled`/`VerifyMatch`/`VerifyAtLeast`/`VerifyAtMost`/`Count`/`CountMatch`. Failed assertions list what was actually received. See ADR-0006.

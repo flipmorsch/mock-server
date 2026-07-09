@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"mock-server/internal/rule"
-	"mock-server/internal/server"
+	"github.com/flipmorsch/mock-server/internal/rule"
+	"github.com/flipmorsch/mock-server/internal/server"
 )
 
 // ---------------------------------------------------------------
@@ -66,6 +66,16 @@ func statusClass(status int) string {
 
 func methodClass(m string) string {
 	return "method method-" + strings.ToUpper(strings.TrimSpace(m))
+}
+
+// seqBodyPreview collapses whitespace and truncates a sequenced response body
+// to a single-line preview for the read-only editor list.
+func seqBodyPreview(body string) string {
+	s := strings.Join(strings.Fields(body), " ")
+	if r := []rune(s); len(r) > 80 {
+		return string(r[:80]) + "…"
+	}
+	return s
 }
 
 // dimLabel renders a machine dim key ("header:Authorization") for humans.
@@ -268,6 +278,38 @@ templ RailItem(r rule.Rule) {
 			</span>
 			<span class="rail-item-path">{ r.Request.Path }</span>
 		</span>
+		if r.Sequenced() {
+			<span class="rail-seq" title="sequenced responses — edit via YAML">▶{ strconv.Itoa(len(r.Responses)) }</span>
+		}
+	</div>
+}
+
+// SequencedResponses renders a sequenced rule's ordered responses read-only —
+// they're YAML-authored (the form can't express the list), so the editor shows
+// them for inspection and blocks editing here. See ADR-0007.
+templ SequencedResponses(responses []rule.Response) {
+	<div class="form-section form-section-resp">
+		<div class="banner-info">
+			{ strconv.Itoa(len(responses)) } sequenced responses — served one per matching request, last sticks. Edit via YAML and reload; not editable here.
+		</div>
+		<ol class="seq-list">
+			for _, r := range responses {
+				<li>
+					<span class={ statusClass(r.Status) }>{ statusVal(r.Status) }</span>
+					if r.Delay != "" {
+						<span class="dim">{ r.Delay }</span>
+					}
+					if r.Template {
+						<span class="dim">tpl</span>
+					}
+					if r.BodyFile != "" {
+						<span class="dim">(file: { r.BodyFile })</span>
+					} else if r.Body != "" {
+						<code class="seq-body">{ seqBodyPreview(r.Body) }</code>
+					}
+				</li>
+			}
+		</ol>
 	</div>
 }
 
@@ -530,6 +572,9 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 			</div>
 			</div>
 			<div class="tab-content" x-show="activeTab === 'response'" x-cloak>
+			if rl.Sequenced() {
+				@SequencedResponses(rl.Responses)
+			} else {
 			<div class="form-section form-section-resp">
 				<div class="form-row">
 					<label class="field">
@@ -584,6 +629,7 @@ templ Editor(rl rule.Rule, isNew bool, errMsg string, highlight string) {
 					{ "{{.Method}} {{.Path}} {{.Body}} {{.Header \"X\"}} {{.Query \"k\"}} · now · nowFormat · randomInt · randomString · counter · requestCount" }
 				</div>
 			</div>
+			}
 			</div>
 			<div class="tab-content" x-show="activeTab === 'test'" x-cloak>
 			<div class="form-section test-panel">
