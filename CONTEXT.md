@@ -4,7 +4,7 @@
 A mapping from an HTTP request pattern (method, URL path, headers, query parameters, body) to a pre-configured mock HTTP response. All specified criteria of a Rule must match for the Rule to trigger (AND semantics). When multiple Rules match a request, the first one defined takes precedence (first-match-wins).
 
 
-All match dimensions, latency simulation, dynamic responses, hot reload, and TLS are implemented (see ADR-0004 and ADR-0005). The library/embeddable form stays post-1.0.
+All match dimensions, latency simulation, dynamic responses, hot reload, TLS, and an embeddable Go library are implemented (see ADR-0004, ADR-0005, ADR-0006).
 
 ### Path Matching
 A Rule's URL path can be matched in one of three modes, chosen per-Rule:

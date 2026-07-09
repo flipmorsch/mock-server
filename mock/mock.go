@@ -152,6 +152,24 @@ func (s *Server) VerifyMatch(m Match, n int) error {
 	return nil
 }
 
+// VerifyAtLeast asserts the mock received at least n requests satisfying m.
+func (s *Server) VerifyAtLeast(m Match, n int) error {
+	if got := s.CountMatch(m); got < n {
+		return fmt.Errorf("expected at least %d request(s) matching %s, got %d\nreceived:\n%s",
+			n, m, got, s.summary())
+	}
+	return nil
+}
+
+// VerifyAtMost asserts the mock received at most n requests satisfying m.
+func (s *Server) VerifyAtMost(m Match, n int) error {
+	if got := s.CountMatch(m); got > n {
+		return fmt.Errorf("expected at most %d request(s) matching %s, got %d\nreceived:\n%s",
+			n, m, got, s.summary())
+	}
+	return nil
+}
+
 func (m Match) String() string {
 	s := orAny(m.Method) + " " + orAny(m.Path)
 	if m.JSONBody != "" {

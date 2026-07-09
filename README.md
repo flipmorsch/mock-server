@@ -74,6 +74,44 @@ kill -HUP <pid>
 
 The reload is atomic and validated — an invalid file leaves the running rules unchanged. Disabled under `--ui` (the UI owns the in-memory rules). Unix only.
 
+## Library (embed in Go tests)
+
+Use mock-server in-process as a test double:
+
+```sh
+go get github.com/flipmorsch/mock-server@latest
+```
+
+```go
+import "github.com/flipmorsch/mock-server/mock"
+
+func TestCheckout(t *testing.T) {
+	m, err := mock.Start(`
+rules:
+  - request: {method: POST, path: /charge}
+    response: {status: 200, body: '{"ok":true}'}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	checkout(m.URL()) // point the code under test at the mock, then exercise it
+
+	// Assert what your code sent to the dependency — failures list what was received.
+	if err := m.VerifyMatch(mock.Match{
+		Method: "POST", Path: "/charge", JSONBody: `{"amount":500}`,
+	}, 1); err != nil {
+		t.Error(err)
+	}
+}
+```
+
+`Start` serves the same YAML as the CLI on a random loopback port. Helpers:
+`URL`, `Close`, `Reset`, `Received`, `Count`/`CountMatch`, and
+`Verify`/`VerifyCalled`/`VerifyMatch`/`VerifyAtLeast`/`VerifyAtMost`. `Match`
+supports `JSONBody` subset matching (partial objects, element-wise arrays).
+
 ## Run tests
 
 ```sh

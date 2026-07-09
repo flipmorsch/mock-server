@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+- **Embeddable Go library** (`github.com/flipmorsch/mock-server/mock`) — run the mock in-process from Go tests: `mock.Start(yaml)` on a random loopback port, `URL`/`Close`/`Reset`/`Received`, and `Verify`/`VerifyCalled`/`VerifyMatch`/`VerifyAtLeast`/`VerifyAtMost`/`Count`/`CountMatch`. Failed assertions list what was actually received. See ADR-0006.
+- **Module renamed** to `github.com/flipmorsch/mock-server` (enables `go get` and `go install`).
+- **JSON subset body matching** — request bodies can be matched with `mode: json` (rules) or `Match{JSONBody: ...}` (library): partial objects, element-wise arrays, equal scalars.
+- **Response capture** — the journal now records the status and body the mock returned (visible in `/__admin/requests` and `Received()`).
+
 ## 1.0.1
 
 - **Fix:** request counts (`requestCount` template func and `/__admin/requests/count`) were capped by the 200-entry journal ring buffer and silently undercounted past 200 requests. Total / method / exact-path counts are now sound via monotonic tallies, independent of the display window.
