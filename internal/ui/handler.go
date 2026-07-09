@@ -138,7 +138,31 @@ func Handler(srv *server.Server, staticFS fs.FS) http.HandlerFunc {
 		SettingsPanel(srv.GetConfig()).Render(r.Context(), w)
 	})
 
+	// Seed for the authoring island (ADR-0010): the whole working copy as JSON.
+	mux.HandleFunc("GET /_ui/api/rules", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(srv.GetConfig())
+	})
+
 	mux.HandleFunc("POST /_ui/api/save", func(w http.ResponseWriter, r *http.Request) {
+		// The authoring island (ADR-0010) POSTs the whole working copy as JSON;
+		// the legacy htmx UI POSTs an empty body and saves the server-held copy.
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+			w.Header().Set("Content-Type", "application/json")
+			var cfg rule.Config
+			if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON: " + err.Error()})
+				return
+			}
+			if err := srv.SaveConfig(cfg); err != nil {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+			return
+		}
 		if err := srv.Save(); err != nil {
 			toast(w, "Save failed: "+err.Error(), "error")
 			return

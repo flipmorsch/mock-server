@@ -190,7 +190,29 @@ func (s *Server) HasUnsaved() bool {
 func (s *Server) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveLocked()
+}
 
+// SaveConfig replaces the working copy with cfg and persists it. The authoring
+// island (ADR-0010) owns the working copy client-side and POSTs the whole thing
+// on save; the write path (Check → Validate → write → swap serving config) is
+// shared with Save. Client-supplied rules already carry ids, so Check's pre-mint
+// id-less-sequenced guard sees them and never false-rejects.
+func (s *Server) SaveConfig(cfg rule.Config) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev := s.workingCopy
+	s.workingCopy = &cfg
+	if err := s.saveLocked(); err != nil {
+		s.workingCopy = prev // a rejected save must not leave the invalid copy staged
+		return err
+	}
+	return nil
+}
+
+// saveLocked persists the current working copy to disk and swaps it into the
+// serving config. The caller must hold s.mu.
+func (s *Server) saveLocked() error {
 	// Validate the working copy BEFORE cloneConfig mints ids, so the
 	// "responses requires an explicit id" guard sees the pre-mint state and an
 	// id-less sequenced rule can't slip through by getting a minted id first

@@ -12,8 +12,8 @@ import (
 )
 
 type Config struct {
-	Listen string `yaml:"listen"`
-	Rules  []Rule `yaml:"rules"`
+	Listen string `yaml:"listen" json:"listen"`
+	Rules  []Rule `yaml:"rules" json:"rules"`
 }
 
 func LoadConfig(path string) (*Config, error) {

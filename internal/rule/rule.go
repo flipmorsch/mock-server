@@ -6,30 +6,30 @@ import (
 )
 
 type Rule struct {
-	ID       string   `yaml:"id"`
-	Name     string   `yaml:"name,omitempty"`
-	Request  Request  `yaml:"request"`
-	Response Response `yaml:"response,omitempty"`
+	ID       string   `yaml:"id" json:"id"`
+	Name     string   `yaml:"name,omitempty" json:"name,omitempty"`
+	Request  Request  `yaml:"request" json:"request"`
+	Response Response `yaml:"response,omitempty" json:"response"`
 	// Responses, when non-empty, is an ordered list served one-per-match (Nth
 	// match → Nth element, last sticks). Mutually exclusive with Response.
-	Responses []Response `yaml:"responses,omitempty"`
+	Responses []Response `yaml:"responses,omitempty" json:"responses,omitempty"`
 }
 
 // Sequenced reports whether the rule serves an ordered response list.
 func (r *Rule) Sequenced() bool { return len(r.Responses) > 0 }
 
 type Request struct {
-	Method   string            `yaml:"method,omitempty"`
-	Path     string            `yaml:"path,omitempty"`
-	PathMode string            `yaml:"path_mode,omitempty"`
-	Headers  map[string]string `yaml:"headers,omitempty"`
-	Query    map[string]string `yaml:"query,omitempty"`
-	Body     *BodyMatch        `yaml:"body,omitempty"`
+	Method   string            `yaml:"method,omitempty" json:"method,omitempty"`
+	Path     string            `yaml:"path,omitempty" json:"path,omitempty"`
+	PathMode string            `yaml:"path_mode,omitempty" json:"path_mode,omitempty"`
+	Headers  map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	Query    map[string]string `yaml:"query,omitempty" json:"query,omitempty"`
+	Body     *BodyMatch        `yaml:"body,omitempty" json:"body,omitempty"`
 }
 
 type BodyMatch struct {
-	Mode  string `yaml:"mode,omitempty"`
-	Value string `yaml:"value"`
+	Mode  string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Value string `yaml:"value" json:"value"`
 }
 
 type Response struct {
