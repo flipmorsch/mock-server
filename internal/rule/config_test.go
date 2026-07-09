@@ -240,6 +240,50 @@ rules:
 	}
 }
 
+func TestLoadConfigPatternPathMode(t *testing.T) {
+	yaml := `
+rules:
+  - name: "pattern rule"
+    request:
+      method: GET
+      path: /users/{id}
+      path_mode: pattern
+    response:
+      status: 200
+      body: ok
+`
+	tmp := writeTemp(t, "config*.yaml", yaml)
+	defer os.Remove(tmp)
+
+	cfg, err := LoadConfig(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Rules[0].Request.PathMode != "pattern" {
+		t.Errorf("path_mode = %q, want pattern", cfg.Rules[0].Request.PathMode)
+	}
+}
+
+func TestLoadConfigPatternInvalid(t *testing.T) {
+	for _, path := range []string{"/users/{", "/users/{}", "/users/{1bad}", "/x/{id}/y/{id}"} {
+		yaml := `
+rules:
+  - name: "bad pattern"
+    request:
+      method: GET
+      path: "` + path + `"
+      path_mode: pattern
+    response:
+      status: 200
+`
+		tmp := writeTemp(t, "config*.yaml", yaml)
+		if _, err := LoadConfig(tmp); err == nil {
+			t.Errorf("expected error for invalid pattern %q", path)
+		}
+		os.Remove(tmp)
+	}
+}
+
 func TestLoadConfigRequestHeaderCanonicalization(t *testing.T) {
 	yaml := `
 rules:

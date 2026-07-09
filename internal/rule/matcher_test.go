@@ -3,6 +3,7 @@ package rule_test
 import (
 	"io"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -123,6 +124,58 @@ func TestMatchRegexPath(t *testing.T) {
 			got := Match(rule, req, nil)
 			if got != tt.want {
 				t.Errorf("Match(GET %s) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchPatternPath(t *testing.T) {
+	rule := &Rule{
+		Request: Request{
+			Method:   "GET",
+			Path:     "/users/{id}",
+			PathMode: "pattern",
+		},
+	}
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"one segment", "/users/42", true},
+		{"non-numeric segment", "/users/abc", true},
+		{"trailing slash", "/users/42/", false},
+		{"extra segment", "/users/42/profile", false},
+		{"missing segment", "/users", false},
+		{"empty segment", "/users/", false},
+		{"wrong prefix", "/orders/42", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.path, nil)
+			if got := Match(rule, req, nil); got != tt.want {
+				t.Errorf("Match(GET %s) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPathParams(t *testing.T) {
+	tests := []struct {
+		name, mode, pattern, path string
+		want                      map[string]string
+	}{
+		{"pattern single", "pattern", "/users/{id}", "/users/42", map[string]string{"id": "42"}},
+		{"pattern multi", "pattern", "/u/{uid}/p/{pid}", "/u/7/p/9", map[string]string{"uid": "7", "pid": "9"}},
+		{"pattern no match", "pattern", "/users/{id}", "/orders/1", nil},
+		{"regex named capture", "regex", `^/users/(?P<id>\d+)$`, "/users/42", map[string]string{"id": "42"}},
+		{"exact mode nil", "exact", "/users/1", "/users/1", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PathParams(tt.mode, tt.pattern, tt.path)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("PathParams(%q, %q, %q) = %v, want %v", tt.mode, tt.pattern, tt.path, got, tt.want)
 			}
 		})
 	}

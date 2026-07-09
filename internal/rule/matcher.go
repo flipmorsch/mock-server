@@ -122,9 +122,69 @@ func PathMatches(mode, pattern, path string) bool {
 	case "regex":
 		matched, _ := regexp.MatchString(pattern, path)
 		return matched
+	case "pattern":
+		// ponytail: compile-per-call like the regex arm; add a cache only if profiling says so.
+		matched, _ := regexp.MatchString(patternToRegex(pattern), path)
+		return matched
 	default:
 		return path == pattern
 	}
+}
+
+// pathParamRe matches a {name} placeholder in a "pattern" path.
+var pathParamRe = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// patternToRegex translates a "pattern" path like /users/{id} into an anchored
+// regex ^/users/(?P<id>[^/]+)$: each {name} captures exactly one path segment and
+// literal spans are escaped. Mirrors net/http ServeMux {name} wildcards.
+func patternToRegex(pattern string) string {
+	var b strings.Builder
+	b.WriteByte('^')
+	last := 0
+	for _, loc := range pathParamRe.FindAllStringSubmatchIndex(pattern, -1) {
+		b.WriteString(regexp.QuoteMeta(pattern[last:loc[0]]))
+		b.WriteString("(?P<")
+		b.WriteString(pattern[loc[2]:loc[3]])
+		b.WriteString(">[^/]+)")
+		last = loc[1]
+	}
+	b.WriteString(regexp.QuoteMeta(pattern[last:]))
+	b.WriteByte('$')
+	return b.String()
+}
+
+// PathParams extracts the named parameters a "pattern" or "regex" rule path
+// captured from the request path. It returns nil for other modes or when the path
+// does not match. Called once per request for the winning rule, not in the hot
+// per-rule matching loop.
+func PathParams(mode, pattern, path string) map[string]string {
+	var expr string
+	switch mode {
+	case "pattern":
+		expr = patternToRegex(pattern)
+	case "regex":
+		expr = pattern
+	default:
+		return nil
+	}
+	re, err := regexp.Compile(expr)
+	if err != nil {
+		return nil
+	}
+	m := re.FindStringSubmatch(path)
+	if m == nil {
+		return nil
+	}
+	var out map[string]string
+	for i, name := range re.SubexpNames() {
+		if i > 0 && name != "" {
+			if out == nil {
+				out = make(map[string]string)
+			}
+			out[name] = m[i]
+		}
+	}
+	return out
 }
 
 func sortedKeys(m map[string]string) []string {

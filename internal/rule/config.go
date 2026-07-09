@@ -58,13 +58,18 @@ func CheckRule(r Rule) error {
 		mode = "exact"
 	}
 	switch mode {
-	case "exact", "prefix", "regex":
+	case "exact", "prefix", "regex", "pattern":
 	default:
-		return fmt.Errorf("unsupported path_mode %q (supported: exact, prefix, regex)", r.Request.PathMode)
+		return fmt.Errorf("unsupported path_mode %q (supported: exact, prefix, regex, pattern)", r.Request.PathMode)
 	}
 	if mode == "regex" {
 		if _, err := regexp.Compile(r.Request.Path); err != nil {
 			return fmt.Errorf("invalid regex pattern %q: %w", r.Request.Path, err)
+		}
+	}
+	if mode == "pattern" {
+		if err := checkPattern(r.Request.Path); err != nil {
+			return fmt.Errorf("invalid path pattern %q: %w", r.Request.Path, err)
 		}
 	}
 	if r.Request.Body != nil {
@@ -92,6 +97,37 @@ func CheckRule(r Rule) error {
 		return nil
 	}
 	return checkResponse(r.Response)
+}
+
+var paramNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// checkPattern verifies a "pattern" path's {name} placeholders are well-formed:
+// every '{' opens a valid, unique {name} group and there are no stray braces. A
+// malformed brace would otherwise be escaped into a literal and silently never
+// match; a duplicate name would silently collapse to one param when captured.
+func checkPattern(p string) error {
+	seen := map[string]bool{}
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '{':
+			end := strings.IndexByte(p[i:], '}')
+			if end < 0 {
+				return fmt.Errorf("unclosed '{'")
+			}
+			name := p[i+1 : i+end]
+			if !paramNameRe.MatchString(name) {
+				return fmt.Errorf("invalid parameter name %q (letters, digits, underscore; must not start with a digit)", name)
+			}
+			if seen[name] {
+				return fmt.Errorf("duplicate parameter name %q", name)
+			}
+			seen[name] = true
+			i += end
+		case '}':
+			return fmt.Errorf("unexpected '}'")
+		}
+	}
+	return nil
 }
 
 // responseIsSet reports whether any response field was populated. Used to reject
