@@ -82,7 +82,50 @@ sequences, and a read-only UI treatment. See ADR-0007. **Next milestone: M3.**
   `/__admin/` endpoint. Defer the full named-scenario state machine until per-rule
   sequencing proves insufficient — the axes are orthogonal and compose later.
 
-### M3 — Distribution automation · S–M
+### M3 — In-process assertions v2 · ✅ shipped in v1.5.0
+Finishes M1's unkept headline: the near-miss / debug-first moat paying rent inside a
+Go test — the chosen primary surface. From a grilling session (2026-07-09); a senior
+panel (architect + backend + QA) proposed independently and two of three converged here.
+- **Self-diagnosing `Verify*` failures.** Today `summary()` (`mock/mock.go:182`) dumps a
+  flat `METHOD PATH → status` list — the request body, the one thing a failed
+  `VerifyMatch(JSONBody:…)` exists to explain, is never printed. Fix: print each received
+  request's body (truncated). For `VerifyMatch`/`VerifyAtLeast`/`VerifyAtMost` with a
+  `JSONBody` filter, also name the closest received request and the first JSON path that
+  differed — extend `rule.JSONBodyMatches` to return the first failing path instead of a
+  bool. Count-only `Verify`/`VerifyCalled` get the body list (nothing to diff).
+- **Widen `mock.Match`** with `Query` and `Headers` (and body `contains`). Pure plumbing:
+  `rule.RequestFilter` / `requestFilterMatch` already implement all three; `Match` just
+  never exposed them. Redaction (v1.0.1) is untouched — the 5 sensitive headers stay
+  `[REDACTED]`, so an empty header value = presence check and exact-value assertions on
+  them are deferred (no named need). Presence semantics live in the `mock` layer so the
+  **frozen** `/__admin/` filter is unchanged.
+- **`StartT(t, yaml)`** — a testing-aware constructor over a minimal `TB` interface
+  (`Fatalf`/`Cleanup`/`Helper`, no `testing` import): fatals on parse error and registers
+  `t.Cleanup(m.Close)`, so a forgotten `Close` can't leak a goroutine/port. `Start` stays.
+- Additive to the `mock` package only; touches no frozen surface (YAML / CLI / `__admin/`).
+- Delivered: `JSONBodyDiff` (first differing path), body + field-diff in `Verify*`
+  failures, `Match.Query`/`Match.Headers` (presence-aware, redaction-safe, matched in
+  the library layer so `/__admin/` stays frozen), and `StartT(t, yaml)`.
+  **Next milestone: M4.**
+
+### M4 — Path parameters · S
+The everyday REST-mock gap: match `/users/{id}` and echo the id back — impossible today
+without a rule-per-id or a hand-written regex (the deferred-backlog "no path-param
+template accessor" item, promoted).
+- **`path_mode: pattern`** — `{name}` matches exactly one path segment (`[^/]+`),
+  mirroring `net/http` ServeMux `{name}` and OpenAPI path templating. A new arm in
+  `PathMatches` → the matcher, the journal filter, and the near-miss `Explain` engine all
+  handle it for free (shared signature, no call-site changes).
+- **`{{.Param "id"}}`** template accessor, mirroring `r.PathValue`; reads captures from
+  both `pattern` mode and `regex` named captures. Threaded
+  `ServeMock` → `writeResponse` → `ExecuteTemplate`.
+- **Header-value templating** when `template: true` (keys stay literal), completing the
+  canonical `201 Created` + `Location: /users/{{.Param "id"}}`. A missing param renders
+  empty (no 500).
+- The new `path_mode` value is an **additive** schema extension — minor-version-safe, not
+  a 2.0 break, consistent with how M2 added `responses:`.
+
+### M5 — Distribution automation · S–M · deferred (was M3; owner deferred 2026-07-09)
 - goreleaser + GH Actions: multi-arch builds, checksums, Docker image, optional
   Homebrew tap, `go install` (module path fixed in M1). Version via ldflags.
 - Turns releases into a tag-push (1.0.0 was built by hand). Zero architectural risk.
