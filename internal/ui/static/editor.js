@@ -178,11 +178,13 @@ export const Editor = {
       if (hl.startsWith('query:')) return section === 'query'
       return hl === section // method, path, body
     }
-    // Reset the tab (and honour a jump-to-rule highlight) whenever the selection changes.
-    watch(() => store.selectedId, () => {
+    // Toggle body.editing (app.css hides the editor pane until it is set) and
+    // reset the tab / honour a jump-to-rule highlight whenever the selection changes.
+    watch(() => store.selectedId, (id) => {
+      document.body.classList.toggle('editing', id !== null)
       activeTab.value = tabFor(store.highlight)
       if (store.highlight) setTimeout(() => { store.highlight = '' }, 1600) // let the flash play once
-    })
+    }, { immediate: true })
 
     function close() { store.selectedId = null }
     function del() {
