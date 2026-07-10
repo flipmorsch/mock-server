@@ -99,6 +99,9 @@ External modifications to the config file while the server is running are not de
 ### Template Preview
 A preview panel renders the Rule's template body against user-supplied sample data (method, path, headers, body), available when `template: true` is set. Default sample: `GET /sample` with empty body and headers.
 
+### Template Autocomplete
+An interactive suggestion dropdown that appears in response body textareas when the user types `{{`. After `{{` it shows all available template variables and functions; after `{{.` it shows only dot-prefixed field accessors. Selecting an item inserts the full tag with argument placeholders (e.g. `{{.Header "name"}}`), with the first placeholder selected for immediate replacement. The popup is positioned below the textarea, navigable by arrow keys, Enter, Tab, or click, and dismissed with Esc. It re-evaluates on every keystroke — appearing, filtering, or dismissing based on cursor context within `{{ }}` delimiters. Filtering is prefix-match. The static tag reference text is replaced by a brief "Type `{{` for autocomplete" hint.
+
 ### Technology
 The UI is split into two surfaces. The **observation surface** (request journal, match explanations, shell, nav) is server-rendered [Templ](https://templ.guide), with the live journal fed by Server-Sent Events. The **authoring surface** (rule list + rule editor) is a reactive [Vue 3](https://vuejs.org) island loaded buildless via an ESM importmap — no bundler, no Node; `templ generate` remains the only build step. The two communicate through DOM `CustomEvent`s on `document.body`. Styling is a hand-written embedded stylesheet (no CSS framework). All assets are embedded via `//go:embed` into the single static binary. See ADR-0009.
 

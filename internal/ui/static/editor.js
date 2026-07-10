@@ -2,11 +2,125 @@
 // selected rule from the shared store directly (optimistic, no round-trips);
 // undo snapshots on focus-in and on structural changes. Test-tab computations
 // (dry-run/probe/preview) stay server-side — this only orchestrates + renders.
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { store, selected, mutate, snapshot, save, toast, uuid, blankResp, wireRuleFor, SETTINGS } from './store.js'
 import { methodClass, statusClass, preview, dimLabel, gotDisplay } from './helpers.js'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
+
+const TPL_SUGGESTIONS = [
+  { label: '.Method', sig: '', full: '{{.Method}}', group: 'field' },
+  { label: '.Path', sig: '', full: '{{.Path}}', group: 'field' },
+  { label: '.Body', sig: '', full: '{{.Body}}', group: 'field' },
+  { label: '.Header', sig: '(name string)', full: '{{.Header "name"}}', group: 'field' },
+  { label: '.Query', sig: '(name string)', full: '{{.Query "name"}}', group: 'field' },
+  { label: '.Param', sig: '(name string)', full: '{{.Param "name"}}', group: 'field' },
+  { label: 'now', sig: '', full: '{{now}}', group: 'func' },
+  { label: 'nowFormat', sig: '(layout string)', full: '{{nowFormat "layout"}}', group: 'func' },
+  { label: 'randomInt', sig: '(min, max int)', full: '{{randomInt 0 100}}', group: 'func' },
+  { label: 'randomString', sig: '(n int)', full: '{{randomString 8}}', group: 'func' },
+  { label: 'counter', sig: '', full: '{{counter}}', group: 'func' },
+  { label: 'requestCount', sig: '(method?, path?)', full: '{{requestCount "GET" "/users"}}', group: 'func' },
+]
+
+const TemplateAutocomplete = {
+  props: {
+    modelValue: String,
+    rows: { type: [String, Number], default: '7' },
+    placeholder: { type: String, default: '' },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    const ta = ref(null)
+    const visible = ref(false)
+    const items = ref([])
+    const selIdx = ref(0)
+    const dismissed = ref(false)
+    const lastStart = ref(-1)
+
+    function parseCtx() {
+      const el = ta.value
+      if (!el) return null
+      const pos = el.selectionStart
+      const text = el.value
+      let i = pos - 1
+      while (i >= 0) {
+        if (text[i] === '{' && text[i + 1] === '{') {
+          const after = text.slice(i + 2, pos)
+          if (after.includes('}}')) return null
+          return { start: i, filter: after, dotted: after.startsWith('.') }
+        }
+        if (text[i] === '}' && text[i + 1] === '}') return null
+        i--
+      }
+      return null
+    }
+    function update() {
+      const ctx = parseCtx()
+      if (!ctx) { visible.value = false; dismissed.value = false; lastStart.value = -1; return }
+      if (ctx.start !== lastStart.value) { dismissed.value = false; lastStart.value = ctx.start }
+      if (dismissed.value) return
+      let cs = TPL_SUGGESTIONS
+      if (ctx.dotted) cs = cs.filter(s => s.group === 'field')
+      const pf = ctx.filter.toLowerCase()
+      if (pf) cs = cs.filter(s => s.label.toLowerCase().startsWith(pf))
+      items.value = cs
+      visible.value = cs.length > 0
+      selIdx.value = 0
+    }
+
+    function select(item) {
+      const el = ta.value
+      const ctx = parseCtx()
+      if (!ctx) return
+      const before = el.value.slice(0, ctx.start)
+      const after = el.value.slice(el.selectionStart)
+      emit('update:modelValue', before + item.full + after)
+      visible.value = false
+      nextTick(() => {
+        const m = item.full.match(/"([^"]+)"/)
+        if (m) {
+          const s = before.length + item.full.indexOf(m[0]) + 1
+          el.focus()
+          el.setSelectionRange(s, s + m[1].length)
+        } else {
+          const e = before.length + item.full.length
+          el.focus()
+          el.setSelectionRange(e, e)
+        }
+      })
+    }
+
+    function onInput(e) { emit('update:modelValue', e.target.value) }
+
+    function onKeydown(e) {
+      if (!visible.value) return
+      if (e.key === 'ArrowDown') { e.preventDefault(); selIdx.value = Math.min(selIdx.value + 1, items.value.length - 1); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); selIdx.value = Math.max(selIdx.value - 1, 0); return }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        if (items.value.length > 0) { e.preventDefault(); select(items.value[selIdx.value]); return }
+      }
+      if (e.key === 'Escape') { e.preventDefault(); visible.value = false; dismissed.value = true; return }
+    }
+
+    watch(() => props.modelValue, () => update())
+
+    return { ta, visible, items, selIdx, select, onInput, onKeydown, update }
+  },
+  template: `
+<div class="tpl-ac">
+  <textarea ref="ta" :value="modelValue" @input="onInput" @keydown="onKeydown" @click="update" @keyup="update"
+            :rows="rows" :placeholder="placeholder" autocomplete="off"></textarea>
+  <div v-show="visible" class="tpl-ac-dd">
+    <div v-for="(item, idx) in items" :key="item.label"
+         class="tpl-ac-item" :class="{'tpl-ac-sel': idx === selIdx}"
+         @mousedown.prevent="select(item)" @mouseenter="selIdx = idx">
+      <span class="tpl-ac-label">{{ item.label }}</span>
+      <span v-if="item.sig" class="tpl-ac-sig">{{ item.sig }}</span>
+    </div>
+  </div>
+</div>`,
+}
 
 const KvEditor = {
   props: ['pairs'],
@@ -23,7 +137,7 @@ const KvEditor = {
 
 const SequenceEditor = {
   props: ['rule'],
-  components: { KvEditor },
+  components: { KvEditor, TemplateAutocomplete },
   setup(props) {
     const moveUp = (i) => {
       if (i > 0) mutate(() => { const a = props.rule.responses;[a[i - 1], a[i]] = [a[i], a[i - 1]] })
@@ -66,7 +180,7 @@ const SequenceEditor = {
       </div>
       <div class="form-section-title sub">response headers</div>
       <kv-editor :pairs="r.headers"></kv-editor>
-      <label class="field"><span class="field-label">body</span><textarea rows="6" v-model="r.body" placeholder='{"ok": true}'></textarea></label>
+      <label class="field"><span class="field-label">body</span><template-autocomplete v-model="r.body" rows="6" placeholder='{"ok": true}'></template-autocomplete></label>
       <label class="field"><span class="field-label">body file</span><input type="text" v-model="r.body_file" placeholder="./fixtures/resp.json" autocomplete="off"></label>
     </div>
   </details>
@@ -161,7 +275,7 @@ const TestPanel = {
 }
 
 export const Editor = {
-  components: { KvEditor, SequenceEditor, TestPanel },
+  components: { KvEditor, SequenceEditor, TestPanel, TemplateAutocomplete },
   setup() {
     const activeTab = ref('request')
     const sel = computed(selected)
@@ -213,9 +327,8 @@ export const Editor = {
       try { await save(); toast('Saved to disk') } catch (e) { toast(e.message, 'error') }
     }
     const markDirty = () => { store.dirty = true }
-    // Kept as a JS string, not inline in the template: literal {{...}} inside a
-    // Vue template would close the interpolation early and break compilation.
-    const tplHint = '{{.Method}} {{.Path}} {{.Body}} {{.Header "X"}} {{.Query "k"}} {{.Param "id"}} · now · nowFormat · randomInt · randomString · counter · requestCount'
+    // Kept as a JS string to avoid Vue interpolation conflicts with {{ }} in the template.
+    const tplHint = 'Type {{ for autocomplete.'
 
     return {
       store, sel, isSettings, isSeq, activeTab, METHODS, flashSection, tplHint,
@@ -305,7 +418,7 @@ export const Editor = {
         <kv-editor :pairs="sel.response.headers"></kv-editor>
         <label class="field"><span class="field-label">body
             <span v-if="sel.response.body_file" class="dim">(file: {{ sel.response.body_file }})</span></span>
-          <textarea v-model="sel.response.body" rows="7" placeholder='{"ok": true}'></textarea></label>
+          <template-autocomplete v-model="sel.response.body" rows="7" placeholder='{"ok": true}'></template-autocomplete></label>
         <label class="field"><span class="field-label">body file</span>
           <input type="text" v-model="sel.response.body_file" placeholder="./fixtures/resp.json" autocomplete="off"></label>
         <div v-show="sel.response.template" class="tpl-hint">{{ tplHint }}</div>

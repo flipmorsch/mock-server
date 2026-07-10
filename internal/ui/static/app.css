@@ -560,6 +560,46 @@ body.editing .editor-pane {
   padding: 6px 9px;
 }
 
+/* template autocomplete */
+
+.tpl-ac { position: relative; }
+.tpl-ac textarea { width: 100%; }
+
+.tpl-ac-dd {
+  position: absolute;
+  left: 0; right: 0;
+  top: 100%;
+  margin-top: 2px;
+  max-height: 196px;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+}
+
+.tpl-ac-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+.tpl-ac-item:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+.tpl-ac-item:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+
+.tpl-ac-sel, .tpl-ac-item:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.tpl-ac-label { color: var(--fg); }
+.tpl-ac-sig { color: var(--fg-dim); font-size: 11px; }
+
 /* kv editor */
 
 .kv-row { display: flex; gap: 6px; margin-bottom: 5px; }
