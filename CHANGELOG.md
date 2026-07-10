@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0
+
+- **Reactive authoring island (Vue 3).** The rule list + editor is now a buildless Vue 3 app — `vue.esm-browser.js` loaded via ESM importmap, no bundler, no Node. A `reactive()` working copy with snapshot-stack undo replaces the old server-side `workingCopy`; unsaved edits are guarded by `beforeunload`. See ADR-0009, ADR-0010. (M6)
+- **JSON API for the island.** `GET /_ui/api/rules` seeds the app; `POST /_ui/api/save` persists the whole working copy (validated server-side, atomic swap). Dry-run, probe, and template-preview are JSON round-trips to the same server-side Go engines — no matcher/template logic duplicated in JS.
+- **Removed:** Alpine.js, htmx, server-side `workingCopy`, and the old form-encoded editor endpoints. The observation surface (journal, match explanations, shell) is now server-rendered Templ + native `EventSource` + plain DOM `CustomEvent`s for cross-surface actions.
+- **Template autocomplete.** Typing `{{` in a response body textarea opens a suggestion dropdown of all template variables and functions; after `{{.` it shows only dot-prefixed field accessors. Arrow keys / Enter / Tab / click to select; Esc to dismiss. Filters by prefix match on every keystroke.
+
 ## 1.6.0
 
 - **Path parameters.** A new `path_mode: pattern` matches templated paths where each `{name}` captures one path segment — `/users/{id}` matches `/users/42` but not `/users/42/edit` or `/users` — mirroring `net/http` ServeMux and OpenAPI path templating. Placeholder names are validated for well-formedness and uniqueness at startup. (M4)

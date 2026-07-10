@@ -126,34 +126,30 @@ template accessor" item, promoted).
   a 2.0 break, consistent with how M2 added `responses:`.
 - Delivered: `path_mode: pattern` (`{name}` = one segment, unique-name validation),
   `PathParams` extraction, `{{.Param "id"}}` (pattern + regex named captures), and
-  response header-value templating under `template: true`. **Next milestone: M5.**
+  response header-value templating under `template: true`. **Next milestone: M6.**
 
 ### M5 — Distribution automation · S–M · deferred (was M3; owner deferred 2026-07-09)
 - goreleaser + GH Actions: multi-arch builds, checksums, Docker image, optional
   Homebrew tap, `go install` (module path fixed in M1). Version via ldflags.
 - Turns releases into a tag-push (1.0.0 was built by hand). Zero architectural risk.
 
-### M6 — Reactive authoring island (UI stack) · L · planned
+### M6 — Reactive authoring island (UI stack) · ✅ shipped in v1.7.0
 From a grilling session (2026-07-09). The authoring surface outgrew htmx+Alpine
 (the driver: rich client interactivity — a working copy held in reactive client
-state with undo). Replace it with a **buildless Vue 3 island**; the observation
+state with undo). Replaced with a **buildless Vue 3 island**; the observation
 surface (journal / SSE / near-miss explanations / shell) is untouched. Non-web
 (native GUI, webview) and a full SPA were rejected; buildless (no Node/bundler)
 preserves the single-static-binary identity and keeps M5 simple. See ADR-0009, ADR-0010.
-- **Server JSON contract.** `GET /_ui/api/rules` (seed) + `POST /_ui/api/save`
-  (whole working copy → `Check` → `Validate` → write → swap `config`); dry-run /
-  probe / template-preview become JSON round-trips to the same server-side engines.
-  **Delete** `workingCopy` + `AddRule`/`UpdateRule`/`DeleteRule`/`ReorderRules`/
-  `UpdateListen` + `ruleFromForm`/`kvFromForm`/`validateField` + the form-encoded
-  editor endpoints. `/_ui/` is internal, exempt from the frozen contract.
-- **Vue island.** Embed `vue.esm-browser.js`; importmap in the Templ shell; rule
-  list + editor as Vue components over a `reactive()` working copy with a
-  snapshot-stack undo. Client-owned draft — refresh loses unsaved edits, guarded by
-  the existing `beforeunload` warning. Matcher/template/probe stay authoritative in Go.
-- **Seam.** Reuse the existing `HX-Trigger` → `CustomEvent` bus: the island
-  subscribes to `mock:seed-rule` / `mock:edit-rule`; `ruleFromEntry` stays server-side.
-- **Delete** `alpine.min.js`; trim `app.js` to observation-surface glue; keep the
-  hand-written stylesheet.
+
+- Delivered: Vue 3 island over ESM importmap (rail + editor components, `reactive()`
+  working copy, snapshot-stack undo); JSON API contract (`GET /_ui/api/rules`,
+  `POST /_ui/api/save`, `/_ui/api/test-dry`, `/_ui/api/test-probe`,
+  `/_ui/api/template-preview`, `/_ui/api/rule-from-entry`); plain DOM `CustomEvent`
+  seam (`mock:edit-rule`, `mock:seed-from`, `mock:save`, `mock:new-rule`, …);
+  **deleted** `alpine.min.js`, `htmx.min.js`, server-side `workingCopy`, and the
+  old form-encoded editor endpoints. As-built refinement: htmx had no job left
+  (the journal uses native `EventSource`, links became native clicks), so it was
+  removed alongside Alpine — ADR-0009 updated to reflect this.
 
 ## Deferred backlog (with reasons)
 
