@@ -118,9 +118,10 @@ The server serves HTTPS when TLS is enabled. `--tls` enables it; with no certifi
 
 ### CLI
 ```
-mock-server [--listen addr:port] [--ui] [--tls] [--tls-cert file --tls-key file] <config.yaml>
+mock-server [--listen addr:port] [--ui] [--tls] [--tls-cert file --tls-key file]
+            [--record --upstream <url> --record-output <file>] <config.yaml>
 ```
-The config file path is required. `--listen` overrides the listen address from the config file. `--ui` activates the embedded Web UI. `--tls` / `--tls-cert` / `--tls-key` configure HTTPS (see TLS above). Standard `--help` and `--version` flags are supported.
+The config file path is required. `--listen` overrides the listen address from the config file. `--ui` activates the embedded Web UI. `--tls` / `--tls-cert` / `--tls-key` configure HTTPS (see TLS above). `--upstream` is required when `--record` is set; `--record-output` defaults to stdout. Standard `--help` and `--version` flags are supported.
 
 The server logs to stdout: a startup line with the listen address, and one line per request (method, path, status, matched Rule or "no match"). Errors are logged to stderr.
 
@@ -134,6 +135,13 @@ With the Web UI enabled (`--ui`), hot reload is disabled — the in-memory worki
 Invalid configuration causes the server to exit immediately with a descriptive error message to stderr. No partial startup.
 Implemented in Go, distributed as a single static binary.
 The tool is a standalone CLI binary and also embeds as a Go library (see Go Library above).
+
+### Recording
+When `--record` is set, the mock server runs as a transparent HTTP proxy instead of serving its rule set. Every incoming request is forwarded to the `--upstream` URL, the upstream response is captured, and a corresponding Rule is appended to the `--record-output` file (default stdout). Recording is a distinct operational mode — existing rules are ignored, and the journal continues to log the proxied exchanges.
+
+Generated Rules match on method and path only. Body, header, and query matching are omitted: the user adds match dimensions during refinement. Response bodies are captured for text content types (`text/*`, `application/json`, `application/xml`); binary content is flagged as skipped and the body left empty. Hop-by-hop headers (`Transfer-Encoding`, `Connection`, `Keep-Alive`, `Proxy-*`, `TE`, `Trailer`, `Upgrade`) and the six redacted headers (`Authorization`, `Cookie`, etc.) are stripped from captured responses.
+
+Each exchange produces exactly one Rule — no merging or path-parameter detection. The generated YAML uses the existing frozen schema; recording is a v1.8.0 addition with no breaking changes. See ADR-0011.
 
 ### Config File Structure
 ```yaml

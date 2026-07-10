@@ -150,6 +150,23 @@ preserves the single-static-binary identity and keeps M5 simple. See ADR-0009, A
   old form-encoded editor endpoints. As-built refinement: htmx had no job left
   (the journal uses native `EventSource`, links became native clicks), so it was
   removed alongside Alpine — ADR-0009 updated to reflect this.
+### M7 — Record & playback · L · planned
+Turns the mock server into a transparent HTTP proxy for recording real traffic
+as rules. When `--record` is set, every request forwards to `--upstream`, the
+response is captured, and a Rule is generated and appended to `--record-output`.
+Recording is a distinct mode — existing rules are ignored. See ADR-0011.
+
+- **Scope (MVP).** Transparent proxy, not passive observer. One rule per exchange
+  (no smart merging). Text-only body capture; binary bodies flagged and skipped.
+  Method + path matching only — no body/header/query matching in generated rules.
+  Hop-by-hop and redacted headers stripped from captured responses. Appended to
+  output file, flushed per capture (crash-safe). CLI-only for MVP; the journal
+  still shows recorded exchanges.
+- **Additive.** No frozen-contract changes (v1.8.0). Generated rules use the
+  existing YAML schema.
+- **Deferred to v2.** Binary body capture, smart path-parameter merging, UI
+  controls, and proxying with rule-set fallback.
+
 
 ## Deferred backlog (with reasons)
 
@@ -157,16 +174,8 @@ preserves the single-static-binary identity and keeps M5 simple. See ADR-0009, A
   (assertion endpoints returning `{satisfied, actual}`). Demoted by the in-process
   decision; the journal substrate for it lands in M1, so it's a thin add if a
   polyglot/CI harness ever needs it.
-- **Record & playback proxy** — the biggest differentiator (realistic mocks from
-  real traffic) but genuinely large: streaming vs the buffered `writeResponse`,
-  binary/gzip bodies in text YAML, the 64KB journal body cap, upstream TLS, brittle
-  generated rules, and a compliance tail (persisting captured secrets). M1's
-  response-capture lays the substrate; revisit for 2.0.
+- **Record & playback proxy** — promoted to M7 (below).
+- **Fault injection** — dropped (2026-07-10). Soft faults (jitter, truncated body, bad Content-Length) add non-determinism to tests without paying rent on the debug-first moat. Hard faults need Hijacker, gated behind HTTP/2. Revisit only on a named, concrete need.
 - **Multi-file config** — pressing past ~30 rules, but collides with ADR-0002
   (which file does Save rewrite?). Ship headless-only `include` if demand appears.
-- **Fault injection** — soft faults (jitter, truncated body, bad Content-Length)
-  are cheap/additive → fold into a point release; hard/connection-level faults
-  (reset, partial-write-hang) need `http.Hijacker`, unavailable under HTTP/2, so
-  they're gated behind the deferred TLSNextProto HTTP/1.1 override.
-- **OpenAPI import** — capped fidelity (no path-param template accessor yet),
-  re-inflates the frozen schema, and Prism already owns the niche.
+- **OpenAPI import** — fidelity ceiling (the frozen YAML schema is a subset of OpenAPI), and Prism already owns the niche.
