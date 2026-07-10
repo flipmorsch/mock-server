@@ -64,9 +64,11 @@ const TemplateAutocomplete = {
       if (ctx.dotted) cs = cs.filter(s => s.group === 'field')
       const pf = ctx.filter.toLowerCase()
       if (pf) cs = cs.filter(s => s.label.toLowerCase().startsWith(pf))
+      const changed = cs.length !== items.value.length || cs.some((s, i) => s.label !== items.value[i]?.label)
       items.value = cs
       visible.value = cs.length > 0
-      selIdx.value = 0
+      if (changed) selIdx.value = 0
+      else if (selIdx.value >= cs.length) selIdx.value = Math.max(0, cs.length - 1)
     }
 
     function select(item) {
