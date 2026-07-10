@@ -211,9 +211,12 @@ export const Editor = {
       try { await save(); toast('Saved to disk') } catch (e) { toast(e.message, 'error') }
     }
     const markDirty = () => { store.dirty = true }
+    // Kept as a JS string, not inline in the template: literal {{...}} inside a
+    // Vue template would close the interpolation early and break compilation.
+    const tplHint = '{{.Method}} {{.Path}} {{.Body}} {{.Header "X"}} {{.Query "k"}} {{.Param "id"}} · now · nowFormat · randomInt · randomString · counter · requestCount'
 
     return {
-      store, sel, isSettings, isSeq, activeTab, METHODS, flashSection,
+      store, sel, isSettings, isSeq, activeTab, METHODS, flashSection, tplHint,
       close, del, duplicate, addResponse, doSave, markDirty, snapshot,
     }
   },
@@ -303,9 +306,7 @@ export const Editor = {
           <textarea v-model="sel.response.body" rows="7" placeholder='{"ok": true}'></textarea></label>
         <label class="field"><span class="field-label">body file</span>
           <input type="text" v-model="sel.response.body_file" placeholder="./fixtures/resp.json" autocomplete="off"></label>
-        <div v-show="sel.response.template" class="tpl-hint">
-          {{ '{{.Method}} {{.Path}} {{.Body}} {{.Header "X"}} {{.Query "k"}} {{.Param "id"}} · now · nowFormat · randomInt · randomString · counter · requestCount' }}
-        </div>
+        <div v-show="sel.response.template" class="tpl-hint">{{ tplHint }}</div>
         <div class="seq-convert">
           <button type="button" class="btn btn-ghost seq-add" @click.prevent="addResponse">+ add response</button>
           <span class="dim">a second response makes this rule sequenced — Nth request gets the Nth, last sticks</span>
