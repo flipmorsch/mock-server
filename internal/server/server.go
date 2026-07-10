@@ -14,6 +14,12 @@ import (
 	"github.com/flipmorsch/mock-server/internal/rule"
 )
 
+
+// RecordConfig holds the recording-mode parameters (ADR-0011). Zero value = recording disabled.
+type RecordConfig struct {
+	Upstream   string // base URL to forward requests to (required when recording)
+	OutputPath string // file to write captured rules (empty = stdout)
+}
 type Server struct {
 	config     *rule.Config
 	configPath string
@@ -23,6 +29,9 @@ type Server struct {
 	logger     *log.Logger // nil = silent (embedded/library default)
 	mu         sync.RWMutex
 	seq        *sequences // per-rule position for sequenced responses
+
+	recordCfg    RecordConfig
+	recordRules  []rule.Rule // captured rules, accumulated for atomic file writes
 }
 
 func NewServer(cfg *rule.Config, configPath string, journal *Journal, uiEnabled bool) *Server {
@@ -164,6 +173,14 @@ func (s *Server) SetTLSEnabled(v bool) {
 
 func (s *Server) TLSEnabled() bool {
 	return s.tlsEnabled
+}
+
+func (s *Server) SetRecordConfig(cfg RecordConfig) {
+	s.recordCfg = cfg
+}
+
+func (s *Server) RecordEnabled() bool {
+	return s.recordCfg.Upstream != ""
 }
 
 // MatchRule walks the serving rules in order. It returns the first match

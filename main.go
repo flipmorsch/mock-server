@@ -27,6 +27,9 @@ func main() {
 	tlsFlag := flag.Bool("tls", false, "serve HTTPS (self-signed cert if --tls-cert/--tls-key not given)")
 	tlsCert := flag.String("tls-cert", "", "path to TLS certificate file (implies --tls)")
 	tlsKey := flag.String("tls-key", "", "path to TLS private key file (implies --tls)")
+	recordEnabled := flag.Bool("record", false, "record mode: proxy requests to upstream and generate rules")
+	upstreamURL := flag.String("upstream", "", "upstream base URL to forward requests when recording (required with --record)")
+	recordOutput := flag.String("record-output", "", "file to append generated rules (default stdout)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: mock-server [flags] <config.yaml>\n")
 		flag.PrintDefaults()
@@ -42,11 +45,17 @@ func main() {
 		os.Exit(1)
 	}
 
+
 	configPath := flag.Arg(0)
+
+	if *recordEnabled && *upstreamURL == "" {
+		fmt.Fprintln(os.Stderr, "Error: --upstream is required when --record is set")
+		os.Exit(1)
+	}
 
 	var cfg *rule.Config
 	var err error
-	if *uiEnabled {
+	if *recordEnabled || *uiEnabled {
 		cfg, err = rule.LoadOrEmpty(configPath)
 	} else {
 		cfg, err = rule.LoadConfig(configPath)
@@ -59,6 +68,12 @@ func main() {
 	journal := server.NewJournal()
 	srv := server.NewServer(cfg, configPath, journal, *uiEnabled)
 	srv.SetLogger(log.Default())
+	if *recordEnabled {
+		srv.SetRecordConfig(server.RecordConfig{
+			Upstream:   *upstreamURL,
+			OutputPath: *recordOutput,
+		})
+	}
 
 	addr := srv.ListenAddr()
 	if *listenOverride != "" {
@@ -80,10 +95,8 @@ func main() {
 	h := &handler{srv: srv}
 
 	// Hot reload is headless-only (ADR-0004): under --ui the working copy owns
-	// the rules, so SIGHUP is ignored there rather than reloading — and, since
-	// unhandled SIGHUP would kill the process, ignoring it also protects the
-	// unsaved working copy from an accidental `kill -HUP`.
-	go watchReload(srv, *uiEnabled)
+	// the rules, and under --record the proxy ignores them entirely.
+	go watchReload(srv, *uiEnabled || *recordEnabled)
 
 	httpServer := &http.Server{
 		Addr:              addr,

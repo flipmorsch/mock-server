@@ -29,6 +29,11 @@ func (s *Server) logf(format string, args ...any) {
 // and records the exchange in the journal. It handles mock traffic only; callers
 // route /_ui/ and /__admin/ before delegating here.
 func (s *Server) ServeMock(w http.ResponseWriter, r *http.Request) {
+	if s.RecordEnabled() {
+		s.recordAndProxy(w, r)
+		return
+	}
+
 	start := time.Now()
 	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
